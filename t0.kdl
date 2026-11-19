@@ -1,0 +1,24 @@
+// T0 検証用レイアウト。probe の出力を読めるよう、プラグインペインを大きく取る。
+// 使い方は scripts/t0-cases.sh の冒頭コメントを参照。
+layout {
+    pane size=1 borderless=true {
+        plugin location="zellij:tab-bar"
+    }
+    pane split_direction="vertical" {
+        pane split_direction="horizontal" {
+            // Enter でタブごと開き直す（wasm を再ビルドした後の再読み込み用）
+            pane size=3 command="bash" {
+                args "-c" "zellij action new-tab --layout t0.kdl --cwd \"$PWD\" && zellij action go-to-previous-tab && zellij action close-tab"
+                start_suspended true
+            }
+            // scripts/t0-cases.sh を実行するペイン
+            pane
+        }
+        pane size="60%" {
+            plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm"
+        }
+    }
+    pane size=2 borderless=true {
+        plugin location="zellij:status-bar"
+    }
+}

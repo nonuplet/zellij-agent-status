@@ -3,7 +3,7 @@
 ## 前提：Zellij 0.46 の OSC 7501 対応
 
 Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` イベントの `PaneInfo.program_status` としてプラグインに渡す。
-そのため、プラグイン側で生の OSC を解析する必要はない見込み。
+プラグイン側で生の OSC を解析する必要はない。
 
 - 定義：`zellij-utils-0.46.0/src/attention.rs`
 
@@ -20,31 +20,28 @@ pub struct ProgramStatusRecord {
 }
 ```
 
-- 送信フォーマットは、Zellij がホストへ送るときの形（`HostProgramStatus::to_osc`）から次のように推測している。受信側の仕様は未確認なので、T0 で確かめる。
-  - `ESC ]7501;state=working:app=claude:msg=<base64> ESC \`
+- 送信フォーマット：`ESC ]7501;state=working:app=claude:msg=<base64> ESC \`
+  - `state` は必須。`msg` と `title` は base64。送るたびにレコードが丸ごと置き換わる。
   - クリア：`ESC ]7501;state=clear ESC \`
-- `PaneInfo.attention`（`PaneAttention`）には、Zellij が program status やベルなどから組み立てた状態も入っている。どちらを使うかは T0 で判断する。
+- 方針：**ルートレコードの `program_status` を使う**。
+  - `PaneInfo.attention` は done や error を表せないので使わない。
+  - `id` 付きレコードは更新イベントが届かないことがあるので、当面は扱わない。
+- 詳細は [osc7501-findings.md](osc7501-findings.md) を参照。
 
 ## フェーズ0：検証（先行して1人で行う）
 
 ### T0. OSC 7501 の受信確認
 
-- `PaneUpdate` を subscribe し、`program_status` と `attention` をログに出す。
-- ペインから `printf` で OSC 7501 を送り、届くことを確認する。
-- 確認すること：
-  - 受け付けるキーと値の形式（`msg` の base64 など）
-  - `id` 付きの複数レコードの扱い
-  - `state=clear` の挙動
-  - イベントが届く頻度
-  - 必要な permission（`ReadApplicationState` の想定）
-- 成果物：内部モデルの型定義（例：`AgentStatus { pane_id, tab, state, app, title, msg, progress, kind }`）。以降の並列作業はこの型を境界にする。
+- 検証は完了した。結果は [osc7501-findings.md](osc7501-findings.md) にまとめてある。
+- 残っている成果物：内部モデルの型定義（例：`AgentStatus { pane_id, tab, state, app, title, msg, progress, kind }`）。以降の並列作業はこの型を境界にする。
 
 ## フェーズ1：並列で進める作業（T0 の型が決まった後）
 
 ### A. 状態の収集
 
-- `PaneManifest` / `TabUpdate` から `Vec<AgentStatus>` に変換する。
-- permission の要求と、ペインが閉じたときの後始末。
+- `PaneUpdate`（`PaneManifest`）のルートレコードから `Vec<AgentStatus>` に変換する。タブ名が必要なら `TabUpdate` も使う。
+- permission（`ReadApplicationState`）の要求。許可が得られるまでは selectable のままにする。
+- レコードは送信元のプログラムが終わると Zellij が自動で消すので、プラグイン側で古いレコードを掃除する必要はない。
 - 変換は副作用のない関数にしてテストする。
 
 ### B. 表示
@@ -61,7 +58,7 @@ pub struct ProgramStatusRecord {
 ### D. 送信側とテスト用ツール
 
 - OSC 7501 を送る手動テスト用スクリプト。
-- Claude Code の hooks から送る例。hooks の stdout は端末につながっていないので、`/dev/tty` に書く必要がありそう。
+- Claude Code の hooks から送る例。hooks の stdout は端末につながっていないので、`/dev/tty` に書く（子プロセスから書いても受理されることは T0 で確認済み）。
 
 ## フェーズ2：統合
 
@@ -69,6 +66,7 @@ pub struct ProgramStatusRecord {
 
 - `main.rs` で A・B・C をつなぐ。
 - `dev.kdl` で動作を確認する。
+- T0 の probe（`src/probe.rs`、`t0.kdl`、`scripts/t0-cases*.sh`）を削除する。削除するなら、[osc7501-findings.md](osc7501-findings.md) の「再現方法」も合わせて直す。
 - README には必要なことだけ追記する。
 
 ### F.（任意）クリックで該当ペインにフォーカス
