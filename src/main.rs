@@ -1,3 +1,4 @@
+mod model;
 mod probe;
 
 use std::collections::BTreeMap;

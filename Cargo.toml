@@ -5,6 +5,9 @@ edition = "2024"
 
 [dependencies]
 zellij-tile = "0.46.0"
+# ProgramStatusRecord / ProgramState は zellij-tile から再エクスポートされていないため直接参照する。
+# zellij-tile が依存しているものと同じバージョンにそろえること。
+zellij-utils = "0.46.0"
 
 [profile.release]
 opt-level = "s"

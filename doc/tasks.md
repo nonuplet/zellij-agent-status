@@ -32,8 +32,9 @@ pub struct ProgramStatusRecord {
 
 ### T0. OSC 7501 の受信確認
 
-- 検証は完了した。結果は [osc7501-findings.md](osc7501-findings.md) にまとめてある。
-- 残っている成果物：内部モデルの型定義（例：`AgentStatus { pane_id, tab, state, app, title, msg, progress, kind }`）。以降の並列作業はこの型を境界にする。
+- 完了。検証結果は [osc7501-findings.md](osc7501-findings.md) にまとめてある。
+- 成果物：内部モデルの型 `AgentStatus` / `AgentState`（`src/model.rs`）。以降の並列作業はこの型を境界にする。
+- `ProgramStatusRecord` などを型名で参照できるよう、`zellij-utils` を直接の依存に加えた（バージョンは zellij-tile にそろえる）。
 
 ## フェーズ1：並列で進める作業（T0 の型が決まった後）
 
