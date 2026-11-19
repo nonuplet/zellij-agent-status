@@ -1,25 +1,37 @@
+mod model;
+mod probe;
+
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 #[derive(Default)]
-struct State;
+struct State {
+    probe: probe::Probe,
+}
 
 register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
-        // ステータスバー用なのでフォーカスできないようにする
-        set_selectable(false);
+        // T0 検証中は permission ダイアログに応答できるよう、set_selectable(false) にしない
+        self.probe = probe::Probe::new();
+        request_permission(&[PermissionType::ReadApplicationState]);
+        subscribe(&[
+            EventType::PermissionRequestResult,
+            EventType::PaneUpdate,
+            EventType::TabUpdate,
+            EventType::PaneAttentionChanged,
+            EventType::GlobalAttentionUpdate,
+            EventType::Timer,
+        ]);
+        set_timeout(probe::TICK_SECS);
     }
 
-    fn update(&mut self, _event: Event) -> bool {
-        false // 再描画不要
+    fn update(&mut self, event: Event) -> bool {
+        self.probe.on_event(&event)
     }
 
-    fn render(&mut self, _rows: usize, cols: usize) {
-        let text = " Claude: Hello, world!";
-        // 幅を超えないよう切り詰める
-        let line: String = text.chars().take(cols).collect();
-        print!("{}", line);
+    fn render(&mut self, rows: usize, cols: usize) {
+        self.probe.render(rows, cols);
     }
 }
