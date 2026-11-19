@@ -1,0 +1,15 @@
+layout {
+    pane size=1 borderless=true {
+        plugin location="zellij:tab-bar"
+    }
+    pane command="bash" {
+        args "-c" "zellij action new-tab --layout dev.kdl --cwd \"$PWD\" && zellij action go-to-previous-tab && zellij action close-tab"
+        start_suspended true
+    }
+    pane size=1 borderless=true {
+        plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm"
+    }
+    pane size=2 borderless=true {
+        plugin location="zellij:status-bar"
+    }
+}
