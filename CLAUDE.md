@@ -1,5 +1,14 @@
+# zellij-agent-status
 
+Zellij 用のプラグインを開発するRustプロジェクトのリポジトリ。
+OSC 7501 を使い、 Zellij のターミナルで動いているエージェントのステータスを表示するプラグインを実装する。
 
+## sandbox環境
+
+echo ${SANDBOX_RUNTIME} をした時に `1` が帰ってきた場合、Claude Code付属のsandbox環境 (bubblewrap) で動作している。以下の内容に注意すること:
+
+- `git` 操作のタイミングなど、ホスト側にない未定義ファイル (`.bashrc`, `.zshrc`, `.gitconfig`, `mcp.json` など) が見えることがある。もし見つけてもこれは無視して良い。報告も不要。
+- `cargo` を使うタイミングで Read や　Write の問題にぶつかる可能性がある。もし遭遇したら無理に回避しようとせず、ユーザに判断を依頼する。
 
 ## ドキュメントに関するルール
 
