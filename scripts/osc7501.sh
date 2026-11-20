@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # OSC 7501 を 1 件送る手動テスト用スクリプト。Zellij のターミナルペインで実行する。
 #
-#   scripts/osc7501.sh working -a claude -m 'ビルド中' -p 40
-#   scripts/osc7501.sh blocked -k permission -a claude -m 'Bash: rm -rf target'
+#   scripts/osc7501.sh working -a claude-code -m 'ビルド中' -p 40
+#   scripts/osc7501.sh blocked -k permission -a claude-code -m 'Bash: rm -rf target'
 #   scripts/osc7501.sh clear
 #
 # 送信元のプログラムが終わってシェルに戻ると、Zellij は約 2 秒でそのペインのレコードを消す。
@@ -18,7 +18,7 @@ Usage: osc7501.sh [options] <state>
   state   idle | working | done | blocked | error | clear
 
 Options:
-  -a APP       送信元のアプリ名（例：claude）
+  -a APP       送信元のアプリ名（例：claude-code）
   -k KIND      blocked の理由：permission | question | auth
   -p PROGRESS  進捗（0〜100）
   -t TITLE     タイトル（base64 にして送る）

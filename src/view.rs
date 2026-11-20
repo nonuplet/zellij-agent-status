@@ -52,7 +52,7 @@ impl IconStyle {
     }
 }
 
-/// 表示の設定。`load` の configuration から作る（doc/tasks.md の C）。
+/// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ViewOptions {
     pub icons: IconStyle,

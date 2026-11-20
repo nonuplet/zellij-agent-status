@@ -6,7 +6,7 @@
 //! ```kdl
 //! plugin location="file:zellij-agent-status.wasm" {
 //!     icon_style "alphabet"
-//!     apps "claude, codex"
+//!     apps "claude-code, codex"
 //! }
 //! ```
 //!
