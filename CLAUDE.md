@@ -3,9 +3,12 @@
 Zellij 用のプラグインを開発するRustプロジェクトのリポジトリ。
 OSC 7501 を使い、 Zellij のターミナルで動いているエージェントのステータスを表示するプラグインを実装する。
 
-## 基本ルール
+## 依存 Crate の調査
 
-- Rust の依存 Crate の定義や実装を調べるときは、grepより先に `rust-analyzer` のツール（定義へのジャンプ、参照検索）を使う
+- まずプロジェクト内の使用箇所から LSP（goToDefinition / hover）で定義へ移動し、Read で読む。
+- 検索が必要なときは Bash の grep を使う。cd はせず、検索先を絶対パスで指定する。
+  - 例: grep -rn "ProgramState" --include='*.rs' ~/.cargo/registry/src/index.crates.io-*/zellij-utils-0.46.0/
+  - バージョンは Cargo.lock で確認し、該当 Crate のディレクトリに絞る。
 
 ## sandbox環境
 
