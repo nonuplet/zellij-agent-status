@@ -15,7 +15,7 @@
 //! | `icon_style` | `symbol` | アイコンを記号（`symbol`）にするか、アルファベット 1 文字（`alphabet`）にするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
 //!
-//! 表示の並びや切り詰めは view.rs で固定しているので、設定では変えられない。
+//! 表示の並びや切り詰めは view（`src/view/layout.rs`）で固定しているので、設定では変えられない。
 //!
 //! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。
@@ -27,8 +27,6 @@ use crate::view::{IconStyle, ViewOptions};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     pub view: ViewOptions,
-    /// 表示する `app`。None なら絞り込まない
-    pub apps: Option<Vec<String>>,
 }
 
 impl Config {
@@ -47,19 +45,10 @@ impl Config {
         }
 
         if let Some(value) = configuration.get("apps") {
-            config.apps = parse_apps(value);
+            config.view.apps = parse_apps(value);
         }
 
         (config, warnings)
-    }
-
-    /// `app` が絞り込みの条件に合うか。`apps` を指定しているときは、`app` のないレコードは表示しない。
-    pub fn accepts_app(&self, app: Option<&str>) -> bool {
-        match (&self.apps, app) {
-            (None, _) => true,
-            (Some(apps), Some(app)) => apps.iter().any(|a| a == app),
-            (Some(_), None) => false,
-        }
     }
 }
 
@@ -97,7 +86,7 @@ mod tests {
         let (config, warnings) = Config::from_configuration(&BTreeMap::new());
         assert!(warnings.is_empty());
         assert_eq!(config.view.icons, IconStyle::Symbol);
-        assert_eq!(config.apps, None);
+        assert_eq!(config.view.apps, None);
     }
 
     #[test]
@@ -122,7 +111,7 @@ mod tests {
         ]));
         assert_eq!(config.view.icons, IconStyle::Symbol);
         // 他のキーは影響を受けない
-        assert_eq!(config.apps, Some(vec!["claude".to_string()]));
+        assert_eq!(config.view.apps, Some(vec!["claude".to_string()]));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].starts_with("icon_style:"));
     }
@@ -142,19 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn accepts_app_without_filter() {
-        let config = Config::default();
-        assert!(config.accepts_app(Some("claude")));
-        assert!(config.accepts_app(None));
-    }
-
-    #[test]
-    fn accepts_app_with_filter() {
-        let (config, _) = Config::from_configuration(&configuration(&[("apps", "claude")]));
-        assert!(config.accepts_app(Some("claude")));
-        assert!(!config.accepts_app(Some("codex")));
-        assert!(!config.accepts_app(Some("Claude")));
-        assert!(!config.accepts_app(None));
+    fn apps_is_passed_to_view_options() {
+        let (config, warnings) = Config::from_configuration(&configuration(&[("apps", "claude")]));
+        assert!(warnings.is_empty());
+        assert_eq!(config.view.apps, Some(vec!["claude".to_string()]));
     }
 
     #[test]

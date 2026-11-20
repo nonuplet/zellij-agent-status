@@ -1,7 +1,4 @@
-//! 表示：エージェントの一覧と幅から、1 行分の文字列（ANSI エスケープ付き）を作る。
-//!
-//! 副作用のない関数だけで構成し、`render` からは [`render_line`] の結果を出力するだけにする。
-//! 内部は「どの文字列をどの役割で並べるか（[`layout`]）」と「色付け（[`paint`]）」に分けてある。
+//! レイアウト：どのエージェントを、どの順で、どの文字列をどの役割で並べるかを決める。
 //!
 //! 幅が足りないときは、次の順に縮める。
 //! 1. msg を各エージェントで均等に切り詰める
@@ -10,12 +7,13 @@
 //! 4. それでも収まらなければ、行の末尾を切る
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use zellij_tile::prelude::{PaletteColor, Styling};
 
+use super::ViewOptions;
+use super::icon::IconStyle;
 use crate::model::{AgentState, AgentStatus};
 
 /// 行頭の余白
-const PAD: &str = " ";
+pub(super) const PAD: &str = " ";
 /// エージェント同士の区切り
 const SEP: &str = "  ";
 /// 切り詰めたことを示す記号。
@@ -25,136 +23,8 @@ const ELLIPSIS: char = '~';
 const MIN_MSG_WIDTH: usize = 6;
 const MIN_NAME_WIDTH: usize = 4;
 
-/// アイコンの種類。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum IconStyle {
-    /// 記号。East Asian Width が Ambiguous の文字（`●` など）は、端末によって幅がずれるので使わない。
-    #[default]
-    Symbol,
-    /// アルファベット 1 文字。記号のフォントがない環境向け。
-    Alphabet,
-}
-
-impl IconStyle {
-    fn icon(self, state: AgentState) -> &'static str {
-        match (self, state) {
-            (IconStyle::Symbol, AgentState::Idle) => "◌",
-            (IconStyle::Symbol, AgentState::Working) => "⟳",
-            (IconStyle::Symbol, AgentState::Blocked) => "!",
-            (IconStyle::Symbol, AgentState::Done) => "✓",
-            (IconStyle::Symbol, AgentState::Error) => "✗",
-            (IconStyle::Alphabet, AgentState::Idle) => "I",
-            (IconStyle::Alphabet, AgentState::Working) => "W",
-            (IconStyle::Alphabet, AgentState::Blocked) => "B",
-            (IconStyle::Alphabet, AgentState::Done) => "D",
-            (IconStyle::Alphabet, AgentState::Error) => "E",
-        }
-    }
-}
-
-/// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ViewOptions {
-    pub icons: IconStyle,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Color {
-    Rgb(u8, u8, u8),
-    /// 256 色のインデックス
-    Indexed(u8),
-}
-
-impl From<PaletteColor> for Color {
-    fn from(color: PaletteColor) -> Self {
-        match color {
-            PaletteColor::Rgb((r, g, b)) => Color::Rgb(r, g, b),
-            PaletteColor::EightBit(n) => Color::Indexed(n),
-        }
-    }
-}
-
-impl Color {
-    /// SGR のパラメータ。`base` は前景色なら 38、背景色なら 48。
-    fn sgr(self, base: u8) -> String {
-        match self {
-            Color::Rgb(r, g, b) => format!("{base};2;{r};{g};{b}"),
-            Color::Indexed(n) => format!("{base};5;{n}"),
-        }
-    }
-}
-
-/// 表示に使う色。`ModeUpdate` で届く `ModeInfo.style.colors` から作る。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Theme {
-    pub fg: Color,
-    pub bg: Color,
-    pub idle: Color,
-    pub working: Color,
-    pub blocked: Color,
-    pub done: Color,
-    pub error: Color,
-}
-
-impl Theme {
-    /// 色の対応は zellij-utils の `From<Palette> for Styling` を参照
-    /// （`text_unselected` の emphasis_0〜2 がそれぞれ orange / cyan / green、`exit_code_error.base` が red）。
-    pub fn from_styling(styling: &Styling) -> Self {
-        let text = &styling.text_unselected;
-        Theme {
-            fg: text.base.into(),
-            bg: text.background.into(),
-            idle: text.base.into(),
-            working: text.emphasis_1.into(),
-            blocked: text.emphasis_0.into(),
-            done: text.emphasis_2.into(),
-            error: styling.exit_code_error.base.into(),
-        }
-    }
-
-    fn state(&self, state: AgentState) -> Color {
-        match state {
-            AgentState::Idle => self.idle,
-            AgentState::Working => self.working,
-            AgentState::Blocked => self.blocked,
-            AgentState::Done => self.done,
-            AgentState::Error => self.error,
-        }
-    }
-}
-
-impl Default for Theme {
-    /// `ModeUpdate` が届くまでに使う色
-    fn default() -> Self {
-        Theme::from_styling(&Styling::default())
-    }
-}
-
-/// 幅 `cols` の 1 行を作る。末尾は背景色の空白で埋める。
-pub fn render_line(
-    agents: &[AgentStatus],
-    cols: usize,
-    theme: &Theme,
-    options: &ViewOptions,
-) -> String {
-    paint(&layout(agents, cols, options), cols, theme)
-}
-
-/// エージェント一覧の代わりに出す 1 行のメッセージ（permission の案内や設定の警告）を作る。
-/// 幅を超える分は切り詰め、末尾は背景色の空白で埋める。
-pub fn render_message(text: &str, cols: usize, theme: &Theme) -> String {
-    let spans = match clean(Some(text)) {
-        Some(text) => clamp(
-            vec![Span::new(PAD, Role::Plain), Span::new(text, Role::Msg)],
-            cols,
-        ),
-        None => vec![],
-    };
-    paint(&spans, cols, theme)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Role {
+pub(super) enum Role {
     /// 余白や区切り
     Plain,
     /// アイコンと進捗。状態の色で塗る。
@@ -164,13 +34,13 @@ enum Role {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Span {
-    text: String,
-    role: Role,
+pub(super) struct Span {
+    pub(super) text: String,
+    pub(super) role: Role,
 }
 
 impl Span {
-    fn new(text: impl Into<String>, role: Role) -> Self {
+    pub(super) fn new(text: impl Into<String>, role: Role) -> Self {
         Span {
             text: text.into(),
             role,
@@ -228,7 +98,7 @@ impl Item {
 /// 外部から届いた文字列を 1 行の表示用にする。
 /// 制御文字（改行や ESC など）はそのまま出すと画面が崩れるので空白に置き換える。
 /// 空になったら None。
-fn clean(text: Option<&str>) -> Option<String> {
+pub(super) fn clean(text: Option<&str>) -> Option<String> {
     let text: String = text?
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -237,10 +107,19 @@ fn clean(text: Option<&str>) -> Option<String> {
     (!text.is_empty()).then(|| text.to_owned())
 }
 
-/// 並べる順は (タブ, ペイン) の順で固定する。
-/// 状態の優先度で並べ替えると、状態が変わるたびに位置が入れ替わって追いにくいため。
-fn layout(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<Span> {
-    let mut agents: Vec<&AgentStatus> = agents.iter().collect();
+/// `options.apps` に合うエージェントだけを、(タブ, ペイン) の順に並べる。
+///
+/// 受け取る一覧の順序には依存しない（Collector は順序を持たない）。
+/// 状態の優先度で並べ替えると、状態が変わるたびに位置が入れ替わって追いにくいため、順序は固定にしている。
+pub(super) fn layout<'a>(
+    agents: impl IntoIterator<Item = &'a AgentStatus>,
+    cols: usize,
+    options: &ViewOptions,
+) -> Vec<Span> {
+    let mut agents: Vec<&AgentStatus> = agents
+        .into_iter()
+        .filter(|a| options.accepts_app(a.app.as_deref()))
+        .collect();
     agents.sort_by_key(|a| (a.tab, a.pane_id));
     let items: Vec<Item> = agents
         .into_iter()
@@ -345,7 +224,7 @@ fn truncate(text: &str, width: usize) -> String {
 }
 
 /// 行全体が `cols` に収まらなければ、末尾を切って [`ELLIPSIS`] を付ける。
-fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
+pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
     if spans.iter().map(|s| s.text.width()).sum::<usize>() <= cols {
         return spans;
     }
@@ -370,50 +249,10 @@ fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
     out
 }
 
-/// Span 列に色を付け、幅 `cols` まで背景色の空白で埋める。
-fn paint(spans: &[Span], cols: usize, theme: &Theme) -> String {
-    let bg = theme.bg.sgr(48);
-    let mut out = String::new();
-    let mut used = 0;
-    for span in spans {
-        let (fg, bold) = match span.role {
-            Role::Plain | Role::Msg => (theme.fg, false),
-            Role::Name => (theme.fg, true),
-            Role::State(state) => (theme.state(state), true),
-        };
-        let bold = if bold { "1;" } else { "" };
-        out.push_str(&format!("\x1b[0;{bold}{};{bg}m{}", fg.sgr(38), span.text));
-        used += span.text.width();
-    }
-    out.push_str(&format!(
-        "\x1b[0;{bg}m{}\x1b[0m",
-        " ".repeat(cols.saturating_sub(used))
-    ));
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
-        AgentStatus {
-            pane_id,
-            tab: 0,
-            state,
-            kind: None,
-            progress: None,
-            app: Some("claude".to_owned()),
-            title: None,
-            msg: None,
-            updated_ms: 0,
-        }
-    }
-
-    fn with_msg(mut a: AgentStatus, msg: &str) -> AgentStatus {
-        a.msg = Some(msg.to_owned());
-        a
-    }
+    use crate::view::tests::{agent, with_msg};
 
     fn plain(agents: &[AgentStatus], cols: usize) -> String {
         plain_with(agents, cols, &ViewOptions::default())
@@ -424,24 +263,6 @@ mod tests {
             .into_iter()
             .map(|s| s.text)
             .collect()
-    }
-
-    /// ANSI エスケープを除いた文字列
-    fn strip_ansi(text: &str) -> String {
-        let mut out = String::new();
-        let mut chars = text.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for c in chars.by_ref() {
-                    if c == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                out.push(c);
-            }
-        }
-        out
     }
 
     #[test]
@@ -473,6 +294,7 @@ mod tests {
         ];
         let alphabet = ViewOptions {
             icons: IconStyle::Alphabet,
+            ..Default::default()
         };
         for (state, symbol, letter) in cases {
             let a = [agent(1, state)];
@@ -482,18 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn symbols_are_one_column_wide() {
-        for state in [
-            AgentState::Idle,
-            AgentState::Working,
-            AgentState::Blocked,
-            AgentState::Done,
-            AgentState::Error,
-        ] {
-            assert_eq!(IconStyle::Symbol.icon(state).width(), 1, "{state:?}");
-            // 端末によって幅が変わらないこと（Ambiguous でないこと）
-            assert_eq!(IconStyle::Symbol.icon(state).width_cjk(), 1, "{state:?}");
-        }
+    fn ellipsis_is_one_column_wide() {
         assert_eq!(ELLIPSIS.width_cjk(), Some(1));
     }
 
@@ -524,6 +335,23 @@ mod tests {
         let mut c = agent(9, AgentState::Idle);
         c.app = Some("c".to_owned());
         assert_eq!(plain(&[b, c, a], 80), " ◌ a  ◌ c  ◌ b");
+    }
+
+    #[test]
+    fn filtered_by_apps() {
+        let mut codex = agent(2, AgentState::Idle);
+        codex.app = Some("codex".to_owned());
+        let mut no_app = agent(3, AgentState::Idle);
+        no_app.app = None;
+        let agents = [agent(1, AgentState::Idle), codex, no_app];
+
+        let only_claude = ViewOptions {
+            apps: Some(vec!["claude".to_owned()]),
+            ..Default::default()
+        };
+        assert_eq!(plain_with(&agents, 80, &only_claude), " ◌ claude");
+        // 絞り込まなければ、app のないエージェントも表示する
+        assert_eq!(plain(&agents, 80), " ◌ claude  ◌ codex  ◌ #3");
     }
 
     #[test]
@@ -595,64 +423,5 @@ mod tests {
         assert_eq!(fair_share(&[3, 20, 20], 20), vec![3, 8, 9]);
         assert_eq!(fair_share(&[3, 4], 100), vec![3, 4]);
         assert_eq!(fair_share(&[], 10), Vec::<usize>::new());
-    }
-
-    #[test]
-    fn paint_colors_spans_and_fills_width() {
-        let theme = Theme {
-            fg: Color::Indexed(7),
-            bg: Color::Rgb(1, 2, 3),
-            idle: Color::Indexed(8),
-            working: Color::Indexed(6),
-            blocked: Color::Indexed(3),
-            done: Color::Indexed(2),
-            error: Color::Indexed(1),
-        };
-        let a = [agent(1, AgentState::Error)];
-        let line = render_line(&a, 20, &theme, &ViewOptions::default());
-        assert!(line.contains("\x1b[0;1;38;5;1;48;2;1;2;3m✗"), "{line:?}");
-        assert!(
-            line.contains("\x1b[0;1;38;5;7;48;2;1;2;3mclaude"),
-            "{line:?}"
-        );
-        assert!(line.ends_with("\x1b[0m"));
-        let visible = strip_ansi(&line);
-        assert_eq!(visible.width(), 20);
-        assert_eq!(visible.trim_end(), " ✗ claude");
-    }
-
-    #[test]
-    fn message_is_cleaned_truncated_and_filled() {
-        let theme = Theme::default();
-        let line = render_message("設定の\n警告です", 12, &theme);
-        let visible = strip_ansi(&line);
-        assert_eq!(visible.width(), 12);
-        assert_eq!(visible, " 設定の 警~ ");
-
-        assert_eq!(strip_ansi(&render_message("ok", 5, &theme)), " ok  ");
-        assert_eq!(strip_ansi(&render_message(" \n", 3, &theme)), "   ");
-        for cols in 0..30 {
-            let visible = strip_ansi(&render_message("permission を待っています", cols, &theme));
-            assert_eq!(visible.width(), cols, "cols={cols}");
-        }
-    }
-
-    #[test]
-    fn theme_follows_styling() {
-        let mut styling = Styling::default();
-        styling.text_unselected.base = PaletteColor::EightBit(1);
-        styling.text_unselected.background = PaletteColor::EightBit(2);
-        styling.text_unselected.emphasis_0 = PaletteColor::EightBit(3);
-        styling.text_unselected.emphasis_1 = PaletteColor::EightBit(4);
-        styling.text_unselected.emphasis_2 = PaletteColor::EightBit(5);
-        styling.exit_code_error.base = PaletteColor::Rgb((6, 7, 8));
-        let theme = Theme::from_styling(&styling);
-        assert_eq!(theme.fg, Color::Indexed(1));
-        assert_eq!(theme.bg, Color::Indexed(2));
-        assert_eq!(theme.idle, Color::Indexed(1));
-        assert_eq!(theme.blocked, Color::Indexed(3));
-        assert_eq!(theme.working, Color::Indexed(4));
-        assert_eq!(theme.done, Color::Indexed(5));
-        assert_eq!(theme.error, Color::Rgb(6, 7, 8));
     }
 }

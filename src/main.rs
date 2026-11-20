@@ -8,7 +8,6 @@ use zellij_tile::prelude::*;
 
 use collect::{Collector, Permission};
 use config::Config;
-use model::AgentStatus;
 use view::Theme;
 
 #[derive(Default)]
@@ -56,44 +55,38 @@ impl ZellijPlugin for State {
     }
 }
 
+/// メッセージの先頭に付ける、どのプラグインからの表示かを示す名前
+const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
+
 impl State {
     fn line(&self, cols: usize) -> String {
-        match self.collector.permission() {
-            // 許可ダイアログはこのペインに出る。ダイアログが出ている間はこの表示は見えない
-            Permission::Pending => {
-                return view::render_message(
-                    "zellij-agent-status: permission の応答を待っています",
-                    cols,
-                    &self.theme,
-                );
-            }
-            Permission::Denied => {
-                return view::render_message(
-                    "zellij-agent-status: ReadApplicationState が許可されていないため表示できません",
-                    cols,
-                    &self.theme,
-                );
-            }
-            Permission::Granted => {}
+        if let Some(text) = permission_message(self.collector.permission()) {
+            return self.message(text, cols);
         }
 
-        let agents: Vec<AgentStatus> = self
+        let options = &self.config.view;
+        // 1 行しかないので、警告はエージェント一覧の表示を邪魔しない「空のとき」だけ出す
+        let empty = !self
             .collector
             .statuses()
-            .iter()
-            .filter(|s| self.config.accepts_app(s.app.as_deref()))
-            .cloned()
-            .collect();
-        // 1 行しかないので、警告はエージェント一覧の表示を邪魔しない「空のとき」だけ出す
-        if agents.is_empty()
-            && let Some(warning) = self.warnings.first()
-        {
-            return view::render_message(
-                &format!("zellij-agent-status: {warning}"),
-                cols,
-                &self.theme,
-            );
+            .any(|s| options.accepts_app(s.app.as_deref()));
+        if empty && let Some(warning) = self.warnings.first() {
+            return self.message(warning, cols);
         }
-        view::render_line(&agents, cols, &self.theme, &self.config.view)
+        view::render_line(self.collector.statuses(), cols, &self.theme, options)
+    }
+
+    fn message(&self, text: &str, cols: usize) -> String {
+        view::render_message(&format!("{MESSAGE_PREFIX}{text}"), cols, &self.theme)
+    }
+}
+
+/// permission が得られていないときに、エージェント一覧の代わりに出すメッセージ。
+fn permission_message(permission: Permission) -> Option<&'static str> {
+    match permission {
+        // 許可ダイアログはこのペインに出る。ダイアログが出ている間はこの表示は見えない
+        Permission::Pending => Some("permission の応答を待っています"),
+        Permission::Denied => Some("ReadApplicationState が許可されていないため表示できません"),
+        Permission::Granted => None,
     }
 }
