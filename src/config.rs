@@ -10,6 +10,7 @@
 //!     show_app "false"
 //!     blocked_first "true"
 //!     max_length 40
+//!     show_cwd "true"
 //! }
 //! ```
 //!
@@ -20,6 +21,7 @@
 //! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //! | `max_length` | `30` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
+//! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
 //! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
@@ -80,6 +82,15 @@ impl Config {
                 Some(max_length) => config.view.max_length = max_length,
                 None => warnings.push(format!(
                     "max_length: `{value}` は使えません。0（上限なし）か {MIN_MAX_LENGTH} 以上の整数を指定してください（既定値 {DEFAULT_MAX_LENGTH} を使います）"
+                )),
+            }
+        }
+
+        if let Some(value) = configuration.get("show_cwd") {
+            match parse_bool(value) {
+                Some(show_cwd) => config.view.show_cwd = show_cwd,
+                None => warnings.push(format!(
+                    "show_cwd: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
                 )),
             }
         }
@@ -145,6 +156,7 @@ mod tests {
         assert!(config.view.show_app);
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
+        assert!(!config.view.show_cwd);
     }
 
     #[test]
@@ -154,6 +166,16 @@ mod tests {
                 Config::from_configuration(&configuration(&[("blocked_first", value)]));
             assert!(warnings.is_empty(), "{value}");
             assert_eq!(config.view.blocked_first, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn show_cwd() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("show_cwd", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.show_cwd, expected, "{value}");
         }
     }
 
@@ -199,6 +221,21 @@ mod tests {
             );
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("max_length:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_show_cwd_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("show_cwd", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.show_cwd, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("show_cwd:"), "{value}");
         }
     }
 

@@ -22,6 +22,7 @@ pane size=1 borderless=true {
         show_app "false"
         blocked_first "true"
         max_length 40
+        show_cwd "true"
     }
 }
 ```
@@ -33,6 +34,9 @@ pane size=1 borderless=true {
 | `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
 | `max_length` | `30` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。12 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
+| `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |
+
+`show_cwd` で表示されるのは、ペインのルートプロセス（通常はシェル）のカレントディレクトリです。エージェントが中で別のディレクトリ（worktree など）に移っても追従せず、SSH 先やサンドボックス内で動くエージェントでは手元のシェルのディレクトリが表示されます。worktree ごとに見分けたいときは、そのディレクトリに `cd` してからエージェントを起動してください。
 
 不正な値は既定値に戻し、エージェントがいないときにプラグインの行へ警告を出します。
 
