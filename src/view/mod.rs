@@ -25,7 +25,7 @@ pub struct ViewOptions {
     pub icons: IconStyle,
     /// 表示する `app`。None なら絞り込まない
     pub apps: Option<Vec<String>>,
-    /// `app` を名前の候補にするか。false なら名前は `title` → `#<pane_id>` の順で決める。
+    /// `app` を名前の候補にするか。false なら名前は `title` → タブ名 → `#<pane_id>` の順で決める。
     /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
     pub show_app: bool,
 }
@@ -93,6 +93,7 @@ pub(crate) mod tests {
         AgentStatus {
             pane_id,
             tab: 0,
+            tab_name: None,
             state,
             kind: None,
             progress: None,

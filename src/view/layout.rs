@@ -58,11 +58,13 @@ struct Item {
 }
 
 impl Item {
-    /// 名前は `title` → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
+    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
+    /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
     fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
         let app = agent.app.as_deref().filter(|_| options.show_app);
         let name = clean(agent.title.as_deref())
+            .or_else(|| clean(agent.tab_name.as_deref()))
             .or_else(|| clean(app))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         Item {
@@ -335,14 +337,26 @@ mod tests {
     }
 
     #[test]
-    fn name_falls_back_from_title_to_app_to_pane_id() {
+    fn name_falls_back_from_title_to_tab_name_to_app_to_pane_id() {
         let mut a = agent(7, AgentState::Idle);
         a.title = Some("my-project".to_owned());
+        a.tab_name = Some("work".to_owned());
         assert_eq!(plain(&[a.clone()], 80), " ◌ my-project");
         a.title = Some("  ".to_owned());
+        assert_eq!(plain(&[a.clone()], 80), " ◌ work");
+        a.tab_name = None;
         assert_eq!(plain(&[a.clone()], 80), " ◌ claude");
         a.app = None;
         assert_eq!(plain(&[a], 80), " ◌ #7");
+    }
+
+    #[test]
+    fn tab_name_is_cleaned_and_skipped_when_empty() {
+        let mut a = agent(7, AgentState::Idle);
+        a.tab_name = Some(" \t\n".to_owned());
+        assert_eq!(plain(&[a.clone()], 80), " ◌ claude");
+        a.tab_name = Some("my\ntab".to_owned());
+        assert_eq!(plain(&[a], 80), " ◌ my tab");
     }
 
     #[test]
@@ -353,8 +367,31 @@ mod tests {
         };
         let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
         assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " ◌ #7: waiting");
+        a.tab_name = Some("work".to_owned());
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " ◌ work: waiting");
         a.title = Some("my-project".to_owned());
         assert_eq!(plain_with(&[a], 80, &hide_app), " ◌ my-project: waiting");
+    }
+
+    #[test]
+    fn tab_name_does_not_affect_order_or_filter() {
+        let mut a = agent(5, AgentState::Idle);
+        a.tab_name = Some("z".to_owned());
+        let mut b = agent(1, AgentState::Idle);
+        b.tab = 1;
+        b.tab_name = Some("a".to_owned());
+        let mut c = agent(9, AgentState::Idle);
+        c.tab_name = Some("z".to_owned());
+        c.app = Some("codex".to_owned());
+        let agents = [b, c, a];
+
+        // 同じタブに複数いると同じ名前が並ぶ（既知の制限）
+        assert_eq!(plain(&agents, 80), " ◌ z  ◌ z  ◌ a");
+        let only_claude = ViewOptions {
+            apps: Some(vec!["claude".to_owned()]),
+            ..Default::default()
+        };
+        assert_eq!(plain_with(&agents, 80, &only_claude), " ◌ z  ◌ a");
     }
 
     #[test]

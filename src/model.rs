@@ -1,6 +1,6 @@
 //! プラグイン内部のデータモデル。
 //!
-//! 状態の収集（`PaneUpdate` からの変換）と表示は、この型を境界にして分けて実装する。
+//! 状態の収集（`PaneUpdate` / `TabUpdate` からの変換）と表示は、この型を境界にして分けて実装する。
 //! 元データは `PaneInfo.program_status` のルートレコード（`id` が None のもの）。
 //! 決めた経緯は doc/osc7501-findings.md を参照。
 
@@ -14,6 +14,8 @@ pub struct AgentStatus {
     pub pane_id: u32,
     /// ペインが属するタブの位置（`PaneManifest.panes` のキー、0 始まり）
     pub tab: usize,
+    /// ペインが属するタブの名前（`TabUpdate` の `TabInfo.name`）。`TabUpdate` がまだ届いていなければ None
+    pub tab_name: Option<String>,
     pub state: AgentState,
     /// `state` が `Blocked` のときの理由
     pub kind: Option<BlockedKind>,
