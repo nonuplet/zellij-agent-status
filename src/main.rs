@@ -66,10 +66,7 @@ impl State {
 
         let options = &self.config.view;
         // 1 行しかないので、警告はエージェント一覧の表示を邪魔しない「空のとき」だけ出す
-        let empty = !self
-            .collector
-            .statuses()
-            .any(|s| options.accepts_app(s.app.as_deref()));
+        let empty = !self.collector.statuses().any(|s| options.shows(s));
         if empty && let Some(warning) = self.warnings.first() {
             return self.message(warning, cols);
         }

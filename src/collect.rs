@@ -233,10 +233,12 @@ mod tests {
         let m = manifest(vec![
             (2, vec![terminal(5, working())]),
             (0, vec![terminal(9, working()), terminal(3, working())]),
+            (1, vec![terminal(1, working())]),
         ]);
 
         let statuses = collect(&m);
-        assert_eq!(statuses.len(), 3);
+        assert_eq!(statuses.len(), 4);
+        assert_eq!(statuses[&1].tab, 1);
         assert_eq!(statuses[&5].tab, 2);
         assert_eq!(statuses[&9].tab, 0);
         assert_eq!(statuses[&3].tab, 0);

@@ -107,7 +107,7 @@ pub(super) fn clean(text: Option<&str>) -> Option<String> {
     (!text.is_empty()).then(|| text.to_owned())
 }
 
-/// `options.apps` に合うエージェントだけを、(タブ, ペイン) の順に並べる。
+/// [`ViewOptions::shows`] が true のエージェントだけを、(タブ, ペイン) の順に並べる。
 ///
 /// 受け取る一覧の順序には依存しない（Collector は順序を持たない）。
 /// 状態の優先度で並べ替えると、状態が変わるたびに位置が入れ替わって追いにくいため、順序は固定にしている。
@@ -116,10 +116,7 @@ pub(super) fn layout<'a>(
     cols: usize,
     options: &ViewOptions,
 ) -> Vec<Span> {
-    let mut agents: Vec<&AgentStatus> = agents
-        .into_iter()
-        .filter(|a| options.accepts_app(a.app.as_deref()))
-        .collect();
+    let mut agents: Vec<&AgentStatus> = agents.into_iter().filter(|a| options.shows(a)).collect();
     agents.sort_by_key(|a| (a.tab, a.pane_id));
     let items: Vec<Item> = agents
         .into_iter()

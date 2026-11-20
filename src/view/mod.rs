@@ -3,8 +3,8 @@
 //! 副作用のない関数だけで構成し、`render` からは [`render_line`] の結果を出力するだけにする。
 //! 表示するエージェントの絞り込みと並び順も、表示の都合としてここで決める（Collector は順序を持たない）。
 //!
-//! - [`layout`]：どのエージェントを、どの順で、どの文字列をどの役割で並べるか（幅に合わせた切り詰めを含む）
-//! - [`paint`]：色付け
+//! - [`layout`](mod@layout)：どのエージェントを、どの順で、どの文字列をどの役割で並べるか（幅に合わせた切り詰めを含む）
+//! - [`paint`](mod@paint)：色付け
 //! - [`theme`] / [`icon`]：色とアイコンの定義
 
 mod icon;
@@ -28,6 +28,12 @@ pub struct ViewOptions {
 }
 
 impl ViewOptions {
+    /// このエージェントを表示するか。表示するエージェントの条件はここに集める
+    /// （[`layout()`] と、一覧が空かどうかを見る `main.rs` の両方が使う）。
+    pub fn shows(&self, agent: &AgentStatus) -> bool {
+        self.accepts_app(agent.app.as_deref())
+    }
+
     /// `app` が絞り込みの条件に合うか。`apps` を指定しているときは、`app` のないレコードは表示しない。
     pub fn accepts_app(&self, app: Option<&str>) -> bool {
         match (&self.apps, app) {
@@ -39,7 +45,7 @@ impl ViewOptions {
 }
 
 /// 幅 `cols` の 1 行を作る。末尾は背景色の空白で埋める。
-/// `agents` の順序は問わない（並び順は [`layout`] で決める）。
+/// `agents` の順序は問わない（並び順は [`layout()`] で決める）。
 pub fn render_line<'a>(
     agents: impl IntoIterator<Item = &'a AgentStatus>,
     cols: usize,
