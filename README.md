@@ -19,6 +19,7 @@ pane size=1 borderless=true {
     plugin location="file:/path/to/zellij-agent-status.wasm" {
         icon_style "alphabet"
         apps "claude-code"
+        show_app "false"
     }
 }
 ```
@@ -27,6 +28,7 @@ pane size=1 borderless=true {
 |---|---|---|
 | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか。絵文字は状態の色で塗られない |
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
+| `show_app` | `true` | `title` がないときに `app` を名前として表示するか（`true` / `false`）。`false` なら `#<pane_id>` を表示する。`apps` の絞り込みには影響しない |
 
 不正な値は既定値に戻し、エージェントがいないときにプラグインの行へ警告を出します。
 
