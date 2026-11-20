@@ -28,6 +28,8 @@ pub struct ViewOptions {
     /// `app` を名前の候補にするか。false なら名前は `title` → タブ名 → `#<pane_id>` の順で決める。
     /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
     pub show_app: bool,
+    /// `Blocked` のエージェントを先頭に並べるか（[`layout()`] の並べ替え）
+    pub blocked_first: bool,
 }
 
 // show_app の既定値を true にするため、derive せずに書く
@@ -37,6 +39,7 @@ impl Default for ViewOptions {
             icons: IconStyle::default(),
             apps: None,
             show_app: true,
+            blocked_first: false,
         }
     }
 }

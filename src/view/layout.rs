@@ -114,14 +114,20 @@ pub(super) fn clean(text: Option<&str>) -> Option<String> {
 /// [`ViewOptions::shows`] が true のエージェントだけを、(タブ, ペイン) の順に並べる。
 ///
 /// 受け取る一覧の順序には依存しない（Collector は順序を持たない）。
-/// 状態の優先度で並べ替えると、状態が変わるたびに位置が入れ替わって追いにくいため、順序は固定にしている。
+/// 状態の優先度で並べ替えると、状態が変わるたびに位置が入れ替わって追いにくいため、既定では状態を見ない。
+/// [`ViewOptions::blocked_first`] が true のときだけ、見落としやすく省略されやすい後ろのほうに
+/// 操作待ちが埋もれないよう、`Blocked` を先頭に割り込ませる。`Blocked` 同士、それ以外同士は (タブ, ペイン) の順のまま。
+/// `Error` などは操作待ちではないので割り込ませない。
 pub(super) fn layout<'a>(
     agents: impl IntoIterator<Item = &'a AgentStatus>,
     cols: usize,
     options: &ViewOptions,
 ) -> Vec<Span> {
     let mut agents: Vec<&AgentStatus> = agents.into_iter().filter(|a| options.shows(a)).collect();
-    agents.sort_by_key(|a| (a.tab, a.pane_id));
+    agents.sort_by_key(|a| {
+        let blocked = options.blocked_first && a.state == AgentState::Blocked;
+        (!blocked, a.tab, a.pane_id)
+    });
     let items: Vec<Item> = agents.into_iter().map(|a| Item::new(a, options)).collect();
     if items.is_empty() {
         return vec![];
@@ -431,6 +437,68 @@ mod tests {
         let mut c = agent(9, AgentState::Idle);
         c.app = Some("c".to_owned());
         assert_eq!(plain(&[b, c, a], 80), " ◌ a  ◌ c  ◌ b");
+    }
+
+    /// (タブ, ペイン) の順で a, b, c, d, e になるエージェント。状態は `states` の順に割り当てる
+    fn named_agents(states: [AgentState; 5]) -> Vec<AgentStatus> {
+        let names = ["a", "b", "c", "d", "e"];
+        let tabs_and_panes = [(0, 1), (0, 5), (1, 2), (1, 3), (2, 0)];
+        names
+            .into_iter()
+            .zip(tabs_and_panes)
+            .zip(states)
+            .rev() // 受け取る順序に依存しないことも確かめる
+            .map(|((name, (tab, pane)), state)| {
+                let mut a = agent(pane, state);
+                a.tab = tab;
+                a.title = Some(name.to_owned());
+                a
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blocked_is_not_moved_by_default() {
+        use AgentState::*;
+        let agents = named_agents([Idle, Blocked, Working, Blocked, Error]);
+        assert_eq!(plain(&agents, 80), " ◌ a  ! b  ⟳ c  ! d  ✗ e");
+    }
+
+    #[test]
+    fn blocked_first_moves_blocked_to_front_keeping_order() {
+        use AgentState::*;
+        let blocked_first = ViewOptions {
+            blocked_first: true,
+            ..Default::default()
+        };
+        let agents = named_agents([Idle, Blocked, Working, Blocked, Error]);
+        assert_eq!(
+            plain_with(&agents, 80, &blocked_first),
+            " ! b  ! d  ◌ a  ⟳ c  ✗ e"
+        );
+        // Blocked が解消されると元の位置に戻る
+        let agents = named_agents([Idle, Working, Working, Blocked, Error]);
+        assert_eq!(
+            plain_with(&agents, 80, &blocked_first),
+            " ! d  ◌ a  ⟳ b  ⟳ c  ✗ e"
+        );
+        let agents = named_agents([Idle, Working, Working, Done, Error]);
+        assert_eq!(
+            plain_with(&agents, 80, &blocked_first),
+            " ◌ a  ⟳ b  ⟳ c  ✓ d  ✗ e"
+        );
+    }
+
+    #[test]
+    fn blocked_first_keeps_blocked_visible_when_line_is_cut() {
+        use AgentState::*;
+        let blocked_first = ViewOptions {
+            blocked_first: true,
+            ..Default::default()
+        };
+        let agents = named_agents([Idle, Idle, Idle, Idle, Blocked]);
+        assert_eq!(plain(&agents, 8), " ◌  ◌  ~");
+        assert_eq!(plain_with(&agents, 8, &blocked_first), " !  ◌  ~");
     }
 
     #[test]
