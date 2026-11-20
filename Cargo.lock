@@ -2607,6 +2607,7 @@ dependencies = [
 name = "zellij-agent-status"
 version = "0.1.0"
 dependencies = [
+ "unicode-width 0.2.3",
  "zellij-tile",
  "zellij-utils",
 ]

@@ -1,6 +1,7 @@
 mod collect;
 mod model;
 mod probe;
+mod view;
 
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;

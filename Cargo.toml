@@ -8,6 +8,8 @@ zellij-tile = "0.46.0"
 # ProgramStatusRecord / ProgramState は zellij-tile から再エクスポートされていないため直接参照する。
 # zellij-tile が依存しているものと同じバージョンにそろえること。
 zellij-utils = "0.46.0"
+# 表示幅の計算用。zellij-utils が依存しているものと同じバージョンにそろえている。
+unicode-width = "0.2.3"
 
 [profile.release]
 opt-level = "s"
