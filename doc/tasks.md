@@ -56,6 +56,9 @@ pub struct ProgramStatusRecord {
 
 - `load` の configuration を読む（表示フォーマット、`app` の絞り込み、記号かアルファベットかの切り替えなど）。
 - B と項目が関係するので、設定のスキーマを先に決めてから並列で進める。
+- 実装済み（`src/config.rs`）。設定項目は冒頭のコメントを参照。
+  - `Config::from_configuration` で設定と警告メッセージを作る。`Config.view` を `render_line` に渡し、`apps` での絞り込みは `Config::accepts_app` で行う。
+  - 表示の並びは B で固定しているので、表示フォーマットは設定項目にしていない。
 
 ### D. 送信側とテスト用ツール
 

@@ -1,4 +1,5 @@
 mod collect;
+mod config;
 mod model;
 mod probe;
 mod view;
