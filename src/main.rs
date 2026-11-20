@@ -1,3 +1,4 @@
+mod collect;
 mod model;
 mod probe;
 
