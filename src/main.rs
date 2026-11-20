@@ -31,7 +31,7 @@ impl ZellijPlugin for State {
         self.warnings = warnings;
 
         // permission の要求と、許可が出るまで selectable のままにする処理は Collector が持つ
-        self.collector.load(self.config.view.show_cwd);
+        self.collector.load();
         subscribe(&[EventType::ModeUpdate]);
     }
 

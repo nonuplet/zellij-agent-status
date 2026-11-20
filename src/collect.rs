@@ -13,7 +13,8 @@
 //! `TabUpdate` と `PaneUpdate` は届く順序が決まっていないため、タブ名の表を持っておき、
 //! どちらが届いても付け直す。タブを移動した直後などで一時的にずれても、もう一方が届けば正しくなる。
 //!
-//! カレントディレクトリ（`show_cwd` が有効なときだけ取得する）は `PaneInfo` にないので、別に持つ。
+//! カレントディレクトリは `PaneInfo` にないので、別に持つ。表示するかどうか（`show_cwd`）は view で決め、
+//! ここでは常に取得する（`get_pane_cwd` も `CwdChanged` も、すでに要求している `ReadApplicationState` で足りる）。
 //! - エージェントのペインが現れたら、`get_pane_cwd` で 1 回取得する（`CwdChanged` は変化したときにしか届かないため）
 //! - その後の移動は `CwdChanged` で追従する
 //! - エージェントでなくなったペインの cwd は捨てる。次にエージェントが現れたら取得し直すので、
@@ -43,8 +44,6 @@ pub enum Permission {
 #[derive(Debug, Default)]
 pub struct Collector {
     permission: Permission,
-    /// カレントディレクトリを取得するか（`show_cwd`）
-    track_cwd: bool,
     /// 最後に届いた `TabUpdate` の、タブの位置 → タブ名
     tab_names: HashMap<usize, String>,
     /// エージェントのペインの id → カレントディレクトリ。取得に失敗したペインは None で持ち、取得し直さない
@@ -55,21 +54,17 @@ pub struct Collector {
 
 impl Collector {
     /// `ZellijPlugin::load` から呼ぶ。permission の要求と、必要なイベントの購読を行う。
-    /// `track_cwd` が true なら、各エージェントのカレントディレクトリも取得する。
     ///
     /// permission ダイアログはプラグインのペインに出るため、許可が得られるまでは
     /// selectable のままにしておく（unselectable にするのは `update` で許可を受け取ったとき）。
-    pub fn load(&mut self, track_cwd: bool) {
-        self.track_cwd = track_cwd;
+    pub fn load(&self) {
         request_permission(&[PermissionType::ReadApplicationState]);
         subscribe(&[
             EventType::PermissionRequestResult,
             EventType::PaneUpdate,
             EventType::TabUpdate,
+            EventType::CwdChanged,
         ]);
-        if track_cwd {
-            subscribe(&[EventType::CwdChanged]);
-        }
     }
 
     /// `ZellijPlugin::update` から呼ぶ。再描画が必要なときに true を返す。
@@ -79,17 +74,13 @@ impl Collector {
         if !was_granted && self.permission == Permission::Granted {
             set_selectable(false);
         }
-        if self.track_cwd {
-            for pane_id in self.missing_cwds() {
-                let cwd = get_pane_cwd(PaneId::Terminal(pane_id))
-                    .inspect_err(|e| {
-                        eprintln!(
-                            "zellij-agent-status: ペイン {pane_id} の cwd を取得できません: {e}"
-                        )
-                    })
-                    .ok();
-                changed |= self.set_cwd(pane_id, cwd);
-            }
+        for pane_id in self.missing_cwds() {
+            let cwd = get_pane_cwd(PaneId::Terminal(pane_id))
+                .inspect_err(|e| {
+                    eprintln!("zellij-agent-status: ペイン {pane_id} の cwd を取得できません: {e}")
+                })
+                .ok();
+            changed |= self.set_cwd(pane_id, cwd);
         }
         changed
     }

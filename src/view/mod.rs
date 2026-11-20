@@ -34,8 +34,7 @@ pub struct ViewOptions {
     /// 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。None なら上限なし。
     /// [`MIN_MAX_LENGTH`] 以上であること（config で検証する）。
     pub max_length: Option<usize>,
-    /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか。
-    /// true のときだけ Collector が cwd を取得する（`main.rs`）。
+    /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
 }
 
