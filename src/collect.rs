@@ -5,6 +5,10 @@
 //! `id` 付きレコードは更新イベントが届かないことがあるため扱わない（doc/osc7501-findings.md）。
 //!
 //! レコードは送信元のプログラムが終わると Zellij が消すので、古いレコードの掃除はしない。
+//!
+//! 一覧はペイン id をキーにした HashMap で持ち、順序は持たない。表示の並び順は view で決める。
+
+use std::collections::HashMap;
 
 use crate::model::{AgentState, AgentStatus};
 use zellij_tile::prelude::*;
@@ -24,7 +28,8 @@ pub enum Permission {
 #[derive(Debug, Default)]
 pub struct Collector {
     permission: Permission,
-    statuses: Vec<AgentStatus>,
+    /// キーはペイン id（ターミナルペインの id はタブをまたいでも一意）
+    statuses: HashMap<u32, AgentStatus>,
 }
 
 impl Collector {
@@ -51,9 +56,9 @@ impl Collector {
         self.permission
     }
 
-    /// タブ順、同じタブ内はペイン id 順に並んだエージェントの一覧。
-    pub fn statuses(&self) -> &[AgentStatus] {
-        &self.statuses
+    /// 現在のエージェントの一覧。順序は決まっていない。
+    pub fn statuses(&self) -> impl Iterator<Item = &AgentStatus> {
+        self.statuses.values()
     }
 
     /// `update` のうち、Zellij の API を呼ばない部分（テスト用に分けている）。
@@ -69,7 +74,8 @@ impl Collector {
                 changed
             }
             Event::PaneUpdate(manifest) => {
-                // PaneUpdate はフォーカス移動などでも届くので、変化がなければ再描画しない
+                // PaneUpdate はフォーカス移動などでも届くので、変化がなければ再描画しない。
+                // HashMap 同士の比較は順序に依存しないので、manifest の走査順の違いは変化として扱われない
                 let statuses = collect(manifest);
                 let changed = self.statuses != statuses;
                 self.statuses = statuses;
@@ -81,11 +87,9 @@ impl Collector {
 }
 
 /// `PaneManifest` から、ルートレコードを持つターミナルペインを `AgentStatus` にする。
-///
-/// 並び順はタブ順、同じタブ内ではペイン id 順。`PaneManifest.panes` は HashMap なので、
-/// 表示が揺れないようにここで順序を固定する。
-pub fn collect(manifest: &PaneManifest) -> Vec<AgentStatus> {
-    let mut statuses: Vec<AgentStatus> = manifest
+/// キーはペイン id。
+pub fn collect(manifest: &PaneManifest) -> HashMap<u32, AgentStatus> {
+    manifest
         .panes
         .iter()
         .flat_map(|(&tab, panes)| {
@@ -94,12 +98,10 @@ pub fn collect(manifest: &PaneManifest) -> Vec<AgentStatus> {
                 .filter(|pane| !pane.is_plugin)
                 .filter_map(move |pane| {
                     let record = pane.program_status.iter().find(|r| r.is_root())?;
-                    Some(to_status(tab, pane.id, record))
+                    Some((pane.id, to_status(tab, pane.id, record)))
                 })
         })
-        .collect();
-    statuses.sort_by_key(|s| (s.tab, s.pane_id));
-    statuses
+        .collect()
 }
 
 fn to_status(tab: usize, pane_id: u32, record: &ProgramStatusRecord) -> AgentStatus {
@@ -120,7 +122,6 @@ fn to_status(tab: usize, pane_id: u32, record: &ProgramStatusRecord) -> AgentSta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use zellij_utils::attention::ProgramState;
 
     fn record(id: Option<&str>, state: ProgramState) -> ProgramStatusRecord {
@@ -161,17 +162,20 @@ mod tests {
 
         assert_eq!(
             collect(&m),
-            vec![AgentStatus {
-                pane_id: 7,
-                tab: 1,
-                state: AgentState::Blocked,
-                kind: Some(BlockedKind::Permission),
-                progress: Some(42),
-                app: Some("claude".to_owned()),
-                title: Some("タイトル".to_owned()),
-                msg: Some("Bash を実行しますか".to_owned()),
-                updated_ms: 1234,
-            }]
+            HashMap::from([(
+                7,
+                AgentStatus {
+                    pane_id: 7,
+                    tab: 1,
+                    state: AgentState::Blocked,
+                    kind: Some(BlockedKind::Permission),
+                    progress: Some(42),
+                    app: Some("claude".to_owned()),
+                    title: Some("タイトル".to_owned()),
+                    msg: Some("Bash を実行しますか".to_owned()),
+                    updated_ms: 1234,
+                }
+            )])
         );
     }
 
@@ -190,7 +194,7 @@ mod tests {
 
         let statuses = collect(&m);
         assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].state, AgentState::Working);
+        assert_eq!(statuses[&1].state, AgentState::Working);
     }
 
     #[test]
@@ -220,11 +224,11 @@ mod tests {
         let root = ProgramStatusRecord::default();
         let m = manifest(vec![(0, vec![terminal(1, vec![root])])]);
 
-        assert_eq!(collect(&m)[0].state, AgentState::Idle);
+        assert_eq!(collect(&m)[&1].state, AgentState::Idle);
     }
 
     #[test]
-    fn sorted_by_tab_then_pane_id() {
+    fn keeps_tab_of_each_pane() {
         let working = || vec![record(None, ProgramState::Working)];
         let m = manifest(vec![
             (2, vec![terminal(5, working())]),
@@ -232,8 +236,12 @@ mod tests {
             (1, vec![terminal(1, working())]),
         ]);
 
-        let order: Vec<(usize, u32)> = collect(&m).iter().map(|s| (s.tab, s.pane_id)).collect();
-        assert_eq!(order, vec![(0, 3), (0, 9), (1, 1), (2, 5)]);
+        let statuses = collect(&m);
+        assert_eq!(statuses.len(), 4);
+        assert_eq!(statuses[&1].tab, 1);
+        assert_eq!(statuses[&5].tab, 2);
+        assert_eq!(statuses[&9].tab, 0);
+        assert_eq!(statuses[&3].tab, 0);
     }
 
     #[test]
@@ -245,19 +253,30 @@ mod tests {
         )]);
 
         assert!(collector.apply(&Event::PaneUpdate(m.clone())));
-        assert_eq!(collector.statuses().len(), 1);
+        assert_eq!(collector.statuses().count(), 1);
 
         // フォーカス移動など、エージェントの状態に関係ない変化
         let mut focused = m.clone();
         focused.panes.get_mut(&0).unwrap()[0].is_focused = true;
         assert!(!collector.apply(&Event::PaneUpdate(focused)));
 
+        // ペインの並び順だけが違う
+        let working = || vec![record(None, ProgramState::Working)];
+        let two = |ids: [u32; 2]| {
+            manifest(vec![(
+                0,
+                ids.into_iter().map(|id| terminal(id, working())).collect(),
+            )])
+        };
+        assert!(collector.apply(&Event::PaneUpdate(two([1, 2]))));
+        assert!(!collector.apply(&Event::PaneUpdate(two([2, 1]))));
+
         // レコードが消えた
         assert!(collector.apply(&Event::PaneUpdate(manifest(vec![(
             0,
             vec![terminal(1, vec![])]
         )]))));
-        assert!(collector.statuses().is_empty());
+        assert_eq!(collector.statuses().count(), 0);
     }
 
     #[test]
