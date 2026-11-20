@@ -1,13 +1,17 @@
-# OSC 7501 の検証結果（T0）
+# OSC 7501 と Zellij 0.46 の挙動
 
 Zellij 0.46 で、ペインから送った OSC 7501 がプラグインからどう見えるかを確かめた結果。
-検証は 2026-11 に実施した。
+検証は 2026-11 に実施した。値を 1 件ずつ送って確かめるには `scripts/osc7501.sh` を使う。
 
-## 再現方法
+Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` の `PaneInfo.program_status` としてプラグインに渡す。プラグイン側で生の OSC を解析する必要はない。
+型の定義は `zellij-utils-0.46.0/src/attention.rs` にある。
 
-- `src/probe.rs`：検証用の probe。受け取ったイベントを画面に表示し、`target/t0-probe.log` にも追記する。
-- `t0.kdl`：検証用のレイアウト。`zellij --layout t0.kdl` で起動する。
-- `scripts/t0-cases.sh` / `scripts/t0-cases2.sh`：テストケースを 1 件ずつ送るスクリプト。左下のペインで実行する。
+## このプラグインの方針
+
+- **ルートレコード（`id` が None のもの）の `program_status` だけを使う。**
+  - `PaneInfo.attention` は done や error を表せないので使わない。
+  - `id` 付きレコードは、更新しても `PaneUpdate` が届かないことがあるので扱わない。
+- 理由はそれぞれ下の「プラグインから見えるデータ」「イベントの届き方」を参照。
 
 ## プラグインから見えるデータ
 
@@ -18,7 +22,7 @@ Zellij 0.46 で、ペインから送った OSC 7501 がプラグインからど�
   - working と blocked は反映される。blocked は `NeedsYou` になり、text は `"needs approval: <msg>"` や `"has a question"` になる。
   - **done と error は反映されず、Idle になる。** フォーカスの有無に関係ない。
   - 複数レコードがあると、優先度の最も高い状態が使われる（例：ルートが working、`id=b` が blocked なら NeedsYou）。
-- `ProgramStatusRecord` と `ProgramState` は zellij-tile の prelude に含まれていないので、`zellij-utils` に依存しない限り、プラグインから型名を書けない。フィールドの参照とメソッド（`as_str()` など）は使える。
+- `ProgramStatusRecord` と `ProgramState` は zellij-tile の prelude に含まれていない。型名を書くには `zellij-utils` に直接依存する必要がある（このプラグインは依存している）。
 
 ## 送信フォーマット
 
@@ -55,12 +59,12 @@ Zellij 0.46 で、ペインから送った OSC 7501 がプラグインからど�
 
 ## レコードが消えるタイミング
 
-- 送信元のプログラムが終わってシェルに戻ると、約 2 秒以内に Zellij がそのペインの全レコードを消す。
+- 送信元のプログラムが終わってシェルに戻ると、約 2 秒以内に Zellij がそのペインの全レコードを消す。そのため、プラグイン側で古いレコードを掃除する必要はない。
   - プロセスの終了がきっかけなのか、プロンプトの表示がきっかけなのかは切り分けていない。
 - 子プロセスから送信して、その子プロセスだけが終わった場合（親は動き続けている場合）は消えない。
-- stdout と stderr を捨てた子プロセスが `/dev/tty` に書いた場合も、受理されて保持される（Claude Code の hooks から送る想定）。
+- stdout と stderr を捨てた子プロセスが `/dev/tty` に書いた場合も、受理されて保持される。
 
 ## プラグイン実装上の注意
 
-- permission ダイアログはプラグインのペインに出るので、`set_selectable(false)` にしているとユーザが応答できない。許可が得られてから unselectable にする。
-  - 今回は、probe を selectable のままにして回避した。unselectable の状態で実際に応答できないかは試していない。
+- permission ダイアログはプラグインのペインに出るので、`set_selectable(false)` にしているとユーザが応答できない。このプラグインは、許可が得られるまで selectable のままにしている（`src/collect.rs`）。
+  - unselectable の状態で本当に応答できないかは試していない。

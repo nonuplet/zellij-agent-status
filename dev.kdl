@@ -1,11 +1,16 @@
+// 開発用レイアウト。`cargo build` の後、プロジェクトルートで `zellij --layout dev.kdl` で起動する。
+
 layout {
     pane size=1 borderless=true {
         plugin location="zellij:tab-bar"
     }
-    pane command="bash" {
+    // Enter でタブごと開き直す（wasm を再ビルドした後の再読み込み用）
+    pane size=3 command="bash" {
         args "-c" "zellij action new-tab --layout dev.kdl --cwd \"$PWD\" && zellij action go-to-previous-tab && zellij action close-tab"
         start_suspended true
     }
+    // scripts/osc7501.sh や scripts/osc7501-demo.sh を実行するペイン
+    pane
     pane size=1 borderless=true {
         plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm"
     }
