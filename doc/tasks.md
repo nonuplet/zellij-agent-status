@@ -64,6 +64,14 @@ pub struct ProgramStatusRecord {
 
 - OSC 7501 を送る手動テスト用スクリプト。
 - Claude Code の hooks から送る例。hooks の stdout は端末につながっていないので、`/dev/tty` に書く（子プロセスから書いても受理されることは T0 で確認済み）。
+- 成果物
+  - `scripts/osc7501.sh`：1 件送る。送信元が終わるとレコードが消えるので、既定では送信後に Enter 待ちでとどまる。
+  - `scripts/osc7501-demo.sh`：全状態を順に送り続ける（B の表示確認用）。
+  - `examples/claude-code/`：hook スクリプト（`hook.sh`、jq が必要）と設定例（`settings.json`）。イベントと状態の対応は `hook.sh` の冒頭に書いてある。
+- 未確認（E で確認する）
+  - 実際の Claude Code から hook が `/dev/tty` に書けるか（hook のプロセスが制御端末を持つか）。
+  - 許可ダイアログで拒否した後にどのイベントが届くか。届かなければ blocked のまま残る。
+  - `UserPromptSubmit` の `prompt` フィールド。hooks のドキュメントの該当節を読めておらず、名前を確かめていない。違っていても msg が空になるだけ。
 
 ## フェーズ2：統合
 
