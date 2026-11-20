@@ -12,7 +12,7 @@ pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme) -> String {
     let mut used = 0;
     for span in spans {
         let (fg, bold) = match span.role {
-            Role::Plain | Role::Msg => (theme.fg, false),
+            Role::Plain | Role::Cwd | Role::Msg => (theme.fg, false),
             Role::Name => (theme.fg, true),
             Role::State(state) => (theme.state(state), true),
         };

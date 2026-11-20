@@ -34,10 +34,12 @@ pub struct ViewOptions {
     /// 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。None なら上限なし。
     /// [`MIN_MAX_LENGTH`] 以上であること（config で検証する）。
     pub max_length: Option<usize>,
+    /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
+    pub show_cwd: bool,
 }
 
 /// [`ViewOptions::max_length`] の既定値
-pub const DEFAULT_MAX_LENGTH: usize = 30;
+pub const DEFAULT_MAX_LENGTH: usize = 50;
 
 // show_app などの既定値を指定するため、derive せずに書く
 impl Default for ViewOptions {
@@ -48,6 +50,7 @@ impl Default for ViewOptions {
             show_app: true,
             blocked_first: false,
             max_length: Some(DEFAULT_MAX_LENGTH),
+            show_cwd: false,
         }
     }
 }
@@ -105,6 +108,7 @@ pub(crate) mod tests {
             pane_id,
             tab: 0,
             tab_name: None,
+            cwd: None,
             state,
             kind: None,
             progress: None,
@@ -117,6 +121,11 @@ pub(crate) mod tests {
 
     pub(crate) fn with_msg(mut a: AgentStatus, msg: &str) -> AgentStatus {
         a.msg = Some(msg.to_owned());
+        a
+    }
+
+    pub(crate) fn with_cwd(mut a: AgentStatus, cwd: &str) -> AgentStatus {
+        a.cwd = Some(cwd.into());
         a
     }
 

@@ -4,6 +4,8 @@
 //! 元データは `PaneInfo.program_status` のルートレコード（`id` が None のもの）。
 //! 決めた経緯は doc/osc7501-findings.md を参照。
 
+use std::path::PathBuf;
+
 use zellij_tile::prelude::BlockedKind;
 use zellij_utils::attention::ProgramState;
 
@@ -16,6 +18,9 @@ pub struct AgentStatus {
     pub tab: usize,
     /// ペインが属するタブの名前（`TabUpdate` の `TabInfo.name`）。`TabUpdate` がまだ届いていなければ None
     pub tab_name: Option<String>,
+    /// ペインのカレントディレクトリ（ペインのルートプロセス、通常はシェルのもの）。
+    /// まだ取得していないとき、取得に失敗したときは None。表示するかどうかは view の `show_cwd` で決める
+    pub cwd: Option<PathBuf>,
     pub state: AgentState,
     /// `state` が `Blocked` のときの理由
     pub kind: Option<BlockedKind>,

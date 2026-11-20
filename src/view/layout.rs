@@ -1,13 +1,20 @@
 //! レイアウト：どのエージェントを、どの順で、どの文字列をどの役割で並べるかを決める。
 //!
+//! 1 エージェント分は `アイコン 進捗 名前 (cwd): msg` の形（進捗・cwd・msg はあるときだけ）。
+//! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
+//!
 //! [`ViewOptions::max_length`] を指定しているときは、まず 1 エージェント分（アイコン・進捗を含む）を
-//! その幅に収める。msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて名前を切り詰める。
+//! その幅に収める。msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて cwd を切り詰め、
+//! [`MIN_CWD_WIDTH`] を下回るなら cwd も省いて名前を切り詰める。
 //!
 //! そのうえで行の幅が足りないときは、次の順に縮める。
 //! 1. msg を各エージェントで均等に切り詰める
-//! 2. msg を省き、名前を均等に切り詰める
-//! 3. アイコン（と進捗）だけにする
-//! 4. それでも収まらなければ、行の末尾を切る
+//! 2. msg を省き、cwd を均等に切り詰める
+//! 3. cwd を省き、名前を均等に切り詰める
+//! 4. アイコン（と進捗）だけにする
+//! 5. それでも収まらなければ、行の末尾を切る
+
+use std::path::Path;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -21,9 +28,14 @@ const SEP: &str = "  ";
 /// 切り詰めたことを示す記号。
 /// `…`（U+2026）は East Asian Width が Ambiguous で、端末によっては 2 桁になるため使わない。
 const ELLIPSIS: char = '~';
-/// 切り詰めた msg / 名前がこの幅を下回るなら、切り詰めずに次の段階へ進む
+/// 切り詰めた msg / cwd / 名前がこの幅を下回るなら、切り詰めずに次の段階へ進む
 const MIN_MSG_WIDTH: usize = 6;
+const MIN_CWD_WIDTH: usize = 4;
 const MIN_NAME_WIDTH: usize = 4;
+/// 名前と msg の間に入る `: ` の幅
+const MSG_OVERHEAD: usize = 2;
+/// 名前の後ろに付ける cwd を囲む ` (` と `)` の幅
+const CWD_OVERHEAD: usize = 3;
 /// [`ViewOptions::max_length`] の下限。
 /// アイコン（最大 2）と進捗（最大 ` 255%` の 5）に、名前の前の空白と [`MIN_NAME_WIDTH`] を足した幅。
 ///
@@ -39,6 +51,7 @@ pub(super) enum Role {
     /// アイコンと進捗。状態の色で塗る。
     State(AgentState),
     Name,
+    Cwd,
     Msg,
 }
 
@@ -64,7 +77,17 @@ struct Item {
     /// `42%` の形
     progress: Option<String>,
     name: String,
+    /// カレントディレクトリの末尾のディレクトリ名（`show_cwd` が false なら None）
+    cwd: Option<String>,
     msg: Option<String>,
+}
+
+/// 各部分を表示する幅の上限。None なら表示しない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Widths {
+    name: Option<usize>,
+    cwd: Option<usize>,
+    msg: Option<usize>,
 }
 
 impl Item {
@@ -77,11 +100,17 @@ impl Item {
             .or_else(|| clean(agent.tab_name.as_deref()))
             .or_else(|| clean(app))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
+        let cwd = agent
+            .cwd
+            .as_deref()
+            .filter(|_| options.show_cwd)
+            .and_then(|cwd| clean(Some(&dir_name(cwd))));
         Item {
             state: agent.state,
             icon: options.icons.icon(agent.state),
             progress: agent.progress.map(|p| format!("{p}%")),
             name,
+            cwd,
             msg: clean(agent.msg.as_deref()),
         }
     }
@@ -91,36 +120,67 @@ impl Item {
         self.icon.width() + self.progress.as_ref().map_or(0, |p| 1 + p.width())
     }
 
-    /// (名前の幅, msg の幅) の上限。`max_length` を指定していれば、1 エージェント分がその幅に収まるようにする。
-    /// msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて名前を切り詰める。
-    fn widths(&self, max_length: Option<usize>) -> (usize, Option<usize>) {
+    /// 各部分の幅の上限（名前は常に Some）。`max_length` を指定していれば、1 エージェント分がその幅に収まるようにする。
+    /// msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて cwd を切り詰め、
+    /// [`MIN_CWD_WIDTH`] を下回るなら cwd も省いて名前を切り詰める。
+    fn widths(&self, max_length: Option<usize>) -> Widths {
         let name = self.name.width();
+        let cwd = self.cwd.as_ref().map(|c| c.width());
         let msg = self.msg.as_ref().map(|m| m.width());
         let Some(max_length) = max_length else {
-            return (name, msg);
+            return Widths {
+                name: Some(name),
+                cwd,
+                msg,
+            };
         };
-        // 名前（と msg）に使える幅。名前の前の空白を除く
+        // 名前（と cwd・msg）に使える幅。名前の前の空白を除く
         let room = max_length.saturating_sub(self.head_width() + 1);
-        // msg の前の ": "
+        let cwd_total = cwd.map_or(0, |c| c + CWD_OVERHEAD);
+        let fits = |width: usize, room: usize, min: usize| width <= room || room >= min;
+
         if let Some(msg) = msg
-            && let Some(msg_room) = room.checked_sub(name + 2)
-            && (msg <= msg_room || msg_room >= MIN_MSG_WIDTH)
+            && let Some(msg_room) = room.checked_sub(name + cwd_total + MSG_OVERHEAD)
+            && fits(msg, msg_room, MIN_MSG_WIDTH)
         {
-            return (name, Some(msg.min(msg_room)));
+            return Widths {
+                name: Some(name),
+                cwd,
+                msg: Some(msg.min(msg_room)),
+            };
         }
-        (name.min(room), None)
+        if let Some(cwd) = cwd
+            && let Some(cwd_room) = room.checked_sub(name + CWD_OVERHEAD)
+            && fits(cwd, cwd_room, MIN_CWD_WIDTH)
+        {
+            return Widths {
+                name: Some(name),
+                cwd: Some(cwd.min(cwd_room)),
+                msg: None,
+            };
+        }
+        Widths {
+            name: Some(name.min(room)),
+            cwd: None,
+            msg: None,
+        }
     }
 
-    /// `name` / `msg` は表示する幅の上限。None なら表示しない。
-    fn spans(&self, name: Option<usize>, msg: Option<usize>) -> Vec<Span> {
+    /// cwd と msg は名前を表示するときだけ表示する。
+    fn spans(&self, widths: Widths) -> Vec<Span> {
         let mut spans = vec![Span::new(self.icon, Role::State(self.state))];
         if let Some(progress) = &self.progress {
             spans.push(Span::new(format!(" {progress}"), Role::State(self.state)));
         }
-        if let Some(width) = name {
+        if let Some(width) = widths.name {
             spans.push(Span::new(" ", Role::Plain));
             spans.push(Span::new(truncate(&self.name, width), Role::Name));
-            if let (Some(text), Some(width)) = (&self.msg, msg) {
+            if let (Some(text), Some(width)) = (&self.cwd, widths.cwd) {
+                spans.push(Span::new(" (", Role::Plain));
+                spans.push(Span::new(truncate(text, width), Role::Cwd));
+                spans.push(Span::new(")", Role::Plain));
+            }
+            if let (Some(text), Some(width)) = (&self.msg, widths.msg) {
                 spans.push(Span::new(": ", Role::Plain));
                 spans.push(Span::new(truncate(text, width), Role::Msg));
             }
@@ -139,6 +199,15 @@ pub(super) fn clean(text: Option<&str>) -> Option<String> {
         .collect();
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// パスの末尾のディレクトリ名。ルート（`/`）のように名前がなければ、パス全体を使う。
+/// フルパスは長く、ホームを `~` に縮めるには環境変数を読む permission が要るため、末尾だけにしている。
+fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// [`ViewOptions::shows`] が true のエージェントだけを、(タブ, ペイン) の順に並べる。
@@ -165,51 +234,79 @@ pub(super) fn layout<'a>(
 
     let mut spans = vec![Span::new(PAD, Role::Plain)];
     let plans = plan(&items, cols, options.max_length);
-    for (i, (item, (name, msg))) in items.iter().zip(plans).enumerate() {
+    for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {
             spans.push(Span::new(SEP, Role::Plain));
         }
-        spans.extend(item.spans(name, msg));
+        spans.extend(item.spans(widths));
     }
     clamp(spans, cols)
 }
 
-/// 各エージェントの (名前の幅, msg の幅) を決める。None は表示しない。
+/// 各エージェントの各部分の幅を決める（縮める順はモジュールの説明を参照）。
 /// [`Item::widths`] で `max_length` に収めた幅を、行の幅に合わせてさらに縮める。
-fn plan(
-    items: &[Item],
-    cols: usize,
-    max_length: Option<usize>,
-) -> Vec<(Option<usize>, Option<usize>)> {
+fn plan(items: &[Item], cols: usize, max_length: Option<usize>) -> Vec<Widths> {
     let fixed = PAD.width()
         + SEP.width() * (items.len() - 1)
         + items.iter().map(Item::head_width).sum::<usize>();
-    let (names, msgs): (Vec<usize>, Vec<Option<usize>>) =
-        items.iter().map(|i| i.widths(max_length)).unzip();
+    let caps: Vec<Widths> = items.iter().map(|i| i.widths(max_length)).collect();
+    let names = shown(&caps, |w| w.name);
     // 名前の前の空白を含む
     let names_total = names.iter().map(|w| 1 + w).sum::<usize>();
-    let shown_msgs: Vec<usize> = msgs.iter().flatten().copied().collect();
-    // msg の前の ": "
-    let msgs_overhead = 2 * shown_msgs.len();
+    let cwds = shown(&caps, |w| w.cwd);
+    let cwds_overhead = CWD_OVERHEAD * cwds.len();
+    let cwds_total = cwds.iter().sum::<usize>() + cwds_overhead;
+    let msgs = shown(&caps, |w| w.msg);
+    let msgs_overhead = MSG_OVERHEAD * msgs.len();
 
-    if let Some(room) = cols.checked_sub(fixed + names_total + msgs_overhead)
-        && let Some(shares) = fit(&shown_msgs, room, MIN_MSG_WIDTH)
+    if let Some(room) = cols.checked_sub(fixed + names_total + cwds_total + msgs_overhead)
+        && let Some(msgs) = fit(&msgs, room, MIN_MSG_WIDTH)
     {
-        let mut shares = shares.into_iter();
-        return names
-            .into_iter()
-            .zip(msgs)
-            .map(|(name, msg)| (Some(name), msg.and_then(|_| shares.next())))
-            .collect();
+        return assemble(&caps, Some(names), Some(cwds), Some(msgs));
+    }
+
+    if let Some(room) = cols.checked_sub(fixed + names_total + cwds_overhead)
+        && let Some(cwds) = fit(&cwds, room, MIN_CWD_WIDTH)
+    {
+        return assemble(&caps, Some(names), Some(cwds), None);
     }
 
     if let Some(room) = cols.checked_sub(fixed + items.len())
-        && let Some(shares) = fit(&names, room, MIN_NAME_WIDTH)
+        && let Some(names) = fit(&names, room, MIN_NAME_WIDTH)
     {
-        return shares.into_iter().map(|w| (Some(w), None)).collect();
+        return assemble(&caps, Some(names), None, None);
     }
 
-    vec![(None, None); items.len()]
+    assemble(&caps, None, None, None)
+}
+
+/// `part` を表示するエージェントについての、その幅の一覧。
+fn shown(caps: &[Widths], part: impl Fn(&Widths) -> Option<usize>) -> Vec<usize> {
+    caps.iter().filter_map(part).collect()
+}
+
+/// [`plan`] の各段階の結果を、エージェントごとの [`Widths`] にする。
+/// `names` / `cwds` / `msgs` は、`caps`（[`Item::widths`] の結果）でその部分を表示するエージェントの分だけを並べたもの。
+/// None はその部分を表示しない。
+fn assemble(
+    caps: &[Widths],
+    names: Option<Vec<usize>>,
+    cwds: Option<Vec<usize>>,
+    msgs: Option<Vec<usize>>,
+) -> Vec<Widths> {
+    let mut names = names.map(Vec::into_iter);
+    let mut cwds = cwds.map(Vec::into_iter);
+    let mut msgs = msgs.map(Vec::into_iter);
+    let next = |cap: Option<usize>, shares: &mut Option<std::vec::IntoIter<usize>>| {
+        cap.and_then(|_| shares.as_mut().and_then(Iterator::next))
+    };
+    caps.iter()
+        .map(|cap| Widths {
+            name: next(cap.name, &mut names),
+            cwd: next(cap.cwd, &mut cwds),
+            msg: next(cap.msg, &mut msgs),
+        })
+        .collect()
 }
 
 /// `room` を [`fair_share`] で分け、切り詰めた結果が `min` を下回るものがあれば None。
@@ -291,7 +388,7 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 mod tests {
     use super::*;
     use crate::view::IconStyle;
-    use crate::view::tests::{agent, with_msg};
+    use crate::view::tests::{agent, with_cwd, with_msg};
 
     fn plain(agents: &[AgentStatus], cols: usize) -> String {
         plain_with(agents, cols, &ViewOptions::default())
@@ -455,6 +552,83 @@ mod tests {
         assert_eq!(plain_with(&agents, 80, &hide_app), " ◌ #1  ◌ #2  ◌ #3");
     }
 
+    /// 行の幅による縮め方を見るため、`max_length` の上限はなくしておく
+    fn show_cwd() -> ViewOptions {
+        ViewOptions {
+            show_cwd: true,
+            max_length: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shows_last_directory_of_cwd_after_name() {
+        let a = with_msg(
+            with_cwd(agent(1, AgentState::Working), "/repo/.worktrees/issue-21"),
+            "Running tests",
+        );
+        assert_eq!(
+            plain_with(std::slice::from_ref(&a), 80, &show_cwd()),
+            " ⟳ claude (issue-21): Running tests"
+        );
+        // 既定では表示しない
+        assert_eq!(plain(&[a], 80), " ⟳ claude: Running tests");
+    }
+
+    #[test]
+    fn cwd_without_last_directory_or_unknown() {
+        let options = show_cwd();
+        let root = with_cwd(agent(1, AgentState::Idle), "/");
+        assert_eq!(plain_with(&[root], 80, &options), " ◌ claude (/)");
+        let trailing = with_cwd(agent(1, AgentState::Idle), "/repo/main/");
+        assert_eq!(plain_with(&[trailing], 80, &options), " ◌ claude (main)");
+        let control = with_cwd(agent(1, AgentState::Idle), "/repo/a\nb");
+        assert_eq!(plain_with(&[control], 80, &options), " ◌ claude (a b)");
+        // 取得できていなければ、括弧ごと表示しない
+        let unknown = agent(1, AgentState::Idle);
+        assert_eq!(plain_with(&[unknown], 80, &options), " ◌ claude");
+    }
+
+    #[test]
+    fn cwd_and_msg_are_placed_per_agent() {
+        let a = with_msg(agent(1, AgentState::Working), "Running tests");
+        let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
+        assert_eq!(
+            plain_with(&[a, b], 80, &show_cwd()),
+            " ⟳ claude: Running tests  ✓ claude (main)"
+        );
+    }
+
+    #[test]
+    fn msgs_then_cwds_then_names_are_shortened() {
+        let options = show_cwd();
+        let a = with_msg(
+            with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
+            "Running tests",
+        );
+        let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
+        let agents = [a, b];
+        let line = |cols| plain_with(&agents, cols, &options);
+
+        assert_eq!(
+            line(58),
+            " ⟳ claude (feature-branch): Running tests  ✓ claude (main)"
+        );
+        // 1. msg を切り詰める（MIN_MSG_WIDTH まで）
+        assert_eq!(
+            line(51),
+            " ⟳ claude (feature-branch): Runni~  ✓ claude (main)"
+        );
+        // 2. msg を省き、cwd を均等に切り詰める
+        assert_eq!(line(50), " ⟳ claude (feature-branch)  ✓ claude (main)");
+        assert_eq!(line(40), " ⟳ claude (feature-br~)  ✓ claude (main)");
+        assert_eq!(line(33), " ⟳ claude (fea~)  ✓ claude (main)");
+        // 3. cwd を省き、名前を切り詰める
+        assert_eq!(line(32), " ⟳ claude  ✓ claude");
+        // 4. アイコンだけにする
+        assert_eq!(line(12), " ⟳  ✓");
+    }
+
     #[test]
     fn control_characters_are_replaced() {
         let a = with_msg(agent(1, AgentState::Done), "line1\nline2\x1b[31m");
@@ -609,11 +783,22 @@ mod tests {
             agent(3, AgentState::Done),
         ];
         agents[0].progress = Some(100);
+        agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
         agents[2].title = Some("全角のタイトル".to_owned());
+        agents[2].cwd = Some("/repo/main".into());
         for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
-            for cols in 0..100 {
-                let text = plain_with(&agents, cols, &icons(style));
-                assert!(text.width() <= cols, "{style:?} cols={cols}: {text:?}");
+            for show_cwd in [false, true] {
+                let options = ViewOptions {
+                    show_cwd,
+                    ..icons(style)
+                };
+                for cols in 0..120 {
+                    let text = plain_with(&agents, cols, &options);
+                    assert!(
+                        text.width() <= cols,
+                        "{style:?} show_cwd={show_cwd} cols={cols}: {text:?}"
+                    );
+                }
             }
         }
     }
@@ -691,12 +876,13 @@ mod tests {
     }
 
     #[test]
-    fn max_length_defaults_to_30_and_none_is_unlimited() {
-        let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrstuvwxyz");
-        // "⟳ claude: " (10) + msg 20 = 30
+    fn max_length_defaults_to_50_and_none_is_unlimited() {
+        let msg = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let a = with_msg(agent(1, AgentState::Working), msg);
+        // "⟳ claude: " (10) + msg 40 = 50
         assert_eq!(
             plain(std::slice::from_ref(&a), 80),
-            " ⟳ claude: abcdefghijklmnopqrs~"
+            " ⟳ claude: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM~"
         );
         let unlimited = ViewOptions {
             max_length: None,
@@ -704,7 +890,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a], 80, &unlimited),
-            " ⟳ claude: abcdefghijklmnopqrstuvwxyz"
+            format!(" ⟳ claude: {msg}")
         );
     }
 
@@ -722,6 +908,54 @@ mod tests {
         assert!(item.head_width() + 1 + MIN_NAME_WIDTH <= MIN_MAX_LENGTH);
     }
 
+    fn max_length_with_cwd(max: usize) -> ViewOptions {
+        ViewOptions {
+            show_cwd: true,
+            ..max_length(max)
+        }
+    }
+
+    #[test]
+    fn max_length_drops_msg_then_truncates_cwd_then_drops_cwd() {
+        let a = with_msg(
+            with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
+            "Running tests",
+        );
+        let line = |max| plain_with(std::slice::from_ref(&a), 80, &max_length_with_cwd(max));
+
+        assert_eq!(line(40), " ⟳ claude (feature-branch): Running tests");
+        // msg を切り詰める（MIN_MSG_WIDTH まで）
+        assert_eq!(line(35), " ⟳ claude (feature-branch): Running~");
+        // msg を省き、cwd を切り詰める（MIN_CWD_WIDTH まで）
+        assert_eq!(line(30), " ⟳ claude (feature-branch)");
+        assert_eq!(line(20), " ⟳ claude (feature-~)");
+        assert_eq!(line(15), " ⟳ claude (fea~)");
+        // cwd も省き、名前を切り詰める
+        assert_eq!(line(14), " ⟳ claude");
+        let mut long = a.clone();
+        long.title = Some("long-project-name".to_owned());
+        assert_eq!(
+            plain_with(&[long], 80, &max_length_with_cwd(14)),
+            " ⟳ long-projec~"
+        );
+    }
+
+    #[test]
+    fn max_length_with_cwd_is_combined_with_row_width() {
+        let a = with_cwd(agent(1, AgentState::Working), "/repo/feature-branch");
+        let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
+        let options = max_length_with_cwd(20);
+        // 上限で切り詰めた cwd（9 と 4）を、行の幅に合わせてさらに均等に縮める
+        assert_eq!(
+            plain_with(&[a.clone(), b.clone()], 80, &options),
+            " ⟳ claude (feature-~)  ✓ claude (main)"
+        );
+        assert_eq!(
+            plain_with(&[a, b], 36, &options),
+            " ⟳ claude (featur~)  ✓ claude (main)"
+        );
+    }
+
     #[test]
     fn never_exceeds_max_length() {
         let mut agents = vec![
@@ -730,18 +964,24 @@ mod tests {
             agent(3, AgentState::Done),
         ];
         agents[0].progress = Some(100);
+        agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
         agents[2].title = Some("全角のタイトル".to_owned());
+        agents[2].cwd = Some("/repo/main".into());
         for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
-            for max in MIN_MAX_LENGTH..40 {
-                let options = ViewOptions {
-                    icons: style,
-                    ..max_length(max)
-                };
-                for cols in 0..100 {
-                    let text = plain_with(&agents, cols, &options);
-                    assert!(text.width() <= cols, "{style:?} max={max} cols={cols}");
-                    for width in agent_widths(&agents, cols, &options) {
-                        assert!(width <= max, "{style:?} max={max} cols={cols}: {text:?}");
+            for show_cwd in [false, true] {
+                for max in MIN_MAX_LENGTH..40 {
+                    let options = ViewOptions {
+                        icons: style,
+                        show_cwd,
+                        ..max_length(max)
+                    };
+                    for cols in 0..100 {
+                        let text = plain_with(&agents, cols, &options);
+                        let case = format!("{style:?} show_cwd={show_cwd} max={max} cols={cols}");
+                        assert!(text.width() <= cols, "{case}");
+                        for width in agent_widths(&agents, cols, &options) {
+                            assert!(width <= max, "{case}: {text:?}");
+                        }
                     }
                 }
             }
