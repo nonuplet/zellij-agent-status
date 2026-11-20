@@ -876,12 +876,13 @@ mod tests {
     }
 
     #[test]
-    fn max_length_defaults_to_30_and_none_is_unlimited() {
-        let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrstuvwxyz");
-        // "⟳ claude: " (10) + msg 20 = 30
+    fn max_length_defaults_to_50_and_none_is_unlimited() {
+        let msg = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let a = with_msg(agent(1, AgentState::Working), msg);
+        // "⟳ claude: " (10) + msg 40 = 50
         assert_eq!(
             plain(std::slice::from_ref(&a), 80),
-            " ⟳ claude: abcdefghijklmnopqrs~"
+            " ⟳ claude: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM~"
         );
         let unlimited = ViewOptions {
             max_length: None,
@@ -889,7 +890,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a], 80, &unlimited),
-            " ⟳ claude: abcdefghijklmnopqrstuvwxyz"
+            format!(" ⟳ claude: {msg}")
         );
     }
 

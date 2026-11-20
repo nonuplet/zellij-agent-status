@@ -40,7 +40,7 @@ pub struct ViewOptions {
 }
 
 /// [`ViewOptions::max_length`] の既定値
-pub const DEFAULT_MAX_LENGTH: usize = 30;
+pub const DEFAULT_MAX_LENGTH: usize = 50;
 
 // show_app などの既定値を指定するため、derive せずに書く
 impl Default for ViewOptions {
