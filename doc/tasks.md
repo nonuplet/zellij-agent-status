@@ -85,19 +85,20 @@ pub struct ProgramStatusRecord {
   - probe 一式を削除し、[osc7501-findings.md](osc7501-findings.md) の「再現方法」を直した。
   - 不要になった hooks の例（`examples/claude-code/`）を削除した（D を参照）。
   - `dev.kdl` に、スクリプトを実行するためのシェルペインを足した。
-- 実機（`dev.kdl`）で確認済み：permission の許可、色付きの表示、Claude Code から送られた状態の表示。
-- 未確認（実機で状況を起こして確かめる）
-  - `ModeUpdate` が届いているか：起動中に config.kdl の `theme` を別のテーマに変え、プラグインの色が tab-bar / status-bar と一緒に変わるか。
+- 完了。実機（`dev.kdl`）で次の項目を確認し、すべて問題なかった。
+  - permission の許可と、許可後の表示。
+  - `ModeUpdate`：`zellij --layout dev.kdl options --theme retro-wave` で起動し、アイコンの色がテーマの色になる。
   - Claude Code の状態ごとの表示
-    - working：時間のかかる指示（例：`sleep 10` を実行させる）を出している間。
-    - blocked / permission：許可されていないコマンドを実行させ、許可ダイアログが出ている間。拒否した後の表示も見る。
-    - blocked / question：選択肢を出して質問するよう頼み、質問が出ている間。
-    - done：応答が終わった後。Esc で中断した後の表示も見る。
-    - error：API エラーを起こす（例：ネットワークを切ってから指示を出す）。
     - idle：起動直後。
-  - Claude Code を終了すると、約 2 秒で表示が消えるか。
-  - 複数のペインで Claude Code を動かしたときの並び順（タブ順 → ペイン id 順）と、端末の幅を狭めたときの切り詰め。
-  - 設定：`dev.kdl` の plugin ブロックに `icon_style "alphabet"` や `apps "claude"` を書き、反映されるか。`icon_style "foo"` で警告が出るか（エージェントがいないときに表示）。
+    - working：時間のかかる指示を出している間。
+    - done：応答が終わった後。
+    - blocked / permission：許可ダイアログが出ている間。許可した後・拒否した後に blocked のまま残らない。
+    - blocked / question：AskUserQuestion で質問が出ている間。
+    - Esc で中断した後に working のまま残らない。
+    - error：`claude --model` に存在しないモデル名を渡して指示を出したとき。
+  - Claude Code を終了すると、約 2 秒で表示が消える。
+  - 複数のペイン・複数のタブで Claude Code を動かしたときの並び順（タブ順 → ペイン id 順）と、端末の幅を狭めたときの切り詰め。
+  - 設定：`icon_style "alphabet"`、`apps "claude"`（`scripts/osc7501-demo.sh` の `demo` が隠れる）、不正な `icon_style` の警告。
 
 ### F.（任意）クリックで該当ペインにフォーカス
 
