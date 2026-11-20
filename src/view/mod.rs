@@ -20,11 +20,25 @@ use layout::{PAD, Role, Span, clamp, clean, layout};
 use paint::paint;
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewOptions {
     pub icons: IconStyle,
     /// 表示する `app`。None なら絞り込まない
     pub apps: Option<Vec<String>>,
+    /// `app` を名前の候補にするか。false なら名前は `title` → `#<pane_id>` の順で決める。
+    /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
+    pub show_app: bool,
+}
+
+// show_app の既定値を true にするため、derive せずに書く
+impl Default for ViewOptions {
+    fn default() -> Self {
+        ViewOptions {
+            icons: IconStyle::default(),
+            apps: None,
+            show_app: true,
+        }
+    }
 }
 
 impl ViewOptions {

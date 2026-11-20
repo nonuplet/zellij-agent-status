@@ -9,7 +9,6 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::ViewOptions;
-use super::icon::IconStyle;
 use crate::model::{AgentState, AgentStatus};
 
 /// 行頭の余白
@@ -59,13 +58,16 @@ struct Item {
 }
 
 impl Item {
-    fn new(agent: &AgentStatus, icons: IconStyle) -> Self {
+    /// 名前は `title` → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
+    /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
+    fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
+        let app = agent.app.as_deref().filter(|_| options.show_app);
         let name = clean(agent.title.as_deref())
-            .or_else(|| clean(agent.app.as_deref()))
+            .or_else(|| clean(app))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         Item {
             state: agent.state,
-            icon: icons.icon(agent.state),
+            icon: options.icons.icon(agent.state),
             progress: agent.progress.map(|p| format!("{p}%")),
             name,
             msg: clean(agent.msg.as_deref()),
@@ -118,10 +120,7 @@ pub(super) fn layout<'a>(
 ) -> Vec<Span> {
     let mut agents: Vec<&AgentStatus> = agents.into_iter().filter(|a| options.shows(a)).collect();
     agents.sort_by_key(|a| (a.tab, a.pane_id));
-    let items: Vec<Item> = agents
-        .into_iter()
-        .map(|a| Item::new(a, options.icons))
-        .collect();
+    let items: Vec<Item> = agents.into_iter().map(|a| Item::new(a, options)).collect();
     if items.is_empty() {
         return vec![];
     }
@@ -249,6 +248,7 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::IconStyle;
     use crate::view::tests::{agent, with_msg};
 
     fn plain(agents: &[AgentStatus], cols: usize) -> String {
@@ -343,6 +343,39 @@ mod tests {
         assert_eq!(plain(&[a.clone()], 80), " ◌ claude");
         a.app = None;
         assert_eq!(plain(&[a], 80), " ◌ #7");
+    }
+
+    #[test]
+    fn hidden_app_is_skipped_as_name() {
+        let hide_app = ViewOptions {
+            show_app: false,
+            ..Default::default()
+        };
+        let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " ◌ #7: waiting");
+        a.title = Some("my-project".to_owned());
+        assert_eq!(plain_with(&[a], 80, &hide_app), " ◌ my-project: waiting");
+    }
+
+    #[test]
+    fn hidden_app_does_not_affect_filter() {
+        let mut codex = agent(2, AgentState::Idle);
+        codex.app = Some("codex".to_owned());
+        let mut no_app = agent(3, AgentState::Idle);
+        no_app.app = None;
+        let agents = [agent(1, AgentState::Idle), codex, no_app];
+
+        let only_claude = ViewOptions {
+            apps: Some(vec!["claude".to_owned()]),
+            show_app: false,
+            ..Default::default()
+        };
+        assert_eq!(plain_with(&agents, 80, &only_claude), " ◌ #1");
+        let hide_app = ViewOptions {
+            show_app: false,
+            ..Default::default()
+        };
+        assert_eq!(plain_with(&agents, 80, &hide_app), " ◌ #1  ◌ #2  ◌ #3");
     }
 
     #[test]

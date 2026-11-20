@@ -7,6 +7,7 @@
 //! plugin location="file:zellij-agent-status.wasm" {
 //!     icon_style "alphabet"
 //!     apps "claude-code, codex"
+//!     show_app "false"
 //! }
 //! ```
 //!
@@ -14,6 +15,10 @@
 //! |---|---|---|
 //! | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
+//! | `show_app` | `true` | `title` がないときに `app` を名前として表示するか。`false` なら `#<pane_id>` を表示する |
+//!
+//! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
+//! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
 //!
 //! 表示の並びや切り詰めは view（`src/view/layout.rs`）で固定しているので、設定では変えられない。
 //!
@@ -48,7 +53,24 @@ impl Config {
             config.view.apps = parse_apps(value);
         }
 
+        if let Some(value) = configuration.get("show_app") {
+            match parse_bool(value) {
+                Some(show_app) => config.view.show_app = show_app,
+                None => warnings.push(format!(
+                    "show_app: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
         (config, warnings)
+    }
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
     }
 }
 
@@ -88,6 +110,36 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(config.view.icons, IconStyle::Symbol);
         assert_eq!(config.view.apps, None);
+        assert!(config.view.show_app);
+    }
+
+    #[test]
+    fn show_app() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("show_app", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.show_app, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_show_app_falls_back_to_default_with_warning() {
+        for value in ["no", "False", "0", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("show_app", value),
+                ("apps", "claude"),
+            ]));
+            assert!(config.view.show_app, "{value}");
+            // 他のキーは影響を受けない
+            assert_eq!(
+                config.view.apps,
+                Some(vec!["claude".to_string()]),
+                "{value}"
+            );
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("show_app:"), "{value}");
+        }
     }
 
     #[test]
