@@ -5,20 +5,23 @@
 //!
 //! - [`layout`](mod@layout)：どのエージェントを、どの順で、どの文字列をどの役割で並べるか（幅に合わせた切り詰めを含む）
 //! - [`paint`](mod@paint)：色付け
-//! - [`theme`] / [`icon`]：色とアイコンの定義
+//! - [`theme`] / [`icon`] / [`separator`]：色・アイコン・区切り文字の定義
 
 mod icon;
 mod layout;
 mod paint;
+mod separator;
 mod theme;
 
 pub use icon::IconStyle;
 pub use layout::MIN_MAX_LENGTH;
+pub use separator::Separator;
 pub use theme::Theme;
 
 use crate::model::AgentStatus;
 use layout::{PAD, Role, Span, clamp, clean, layout};
 use paint::paint;
+use separator::PLAIN_SEPARATOR;
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +39,11 @@ pub struct ViewOptions {
     pub max_length: Option<usize>,
     /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
+    /// Nerd Font モード。区切りを [`ViewOptions::separator`] の文字にし、名前の後ろに
+    /// `app` のアイコンを付ける。状態アイコン（[`ViewOptions::icons`]）は config 側で切り替える。
+    pub nerd_font: bool,
+    /// Nerd Font モードの区切り文字。`nerd_font` が false なら使わない
+    pub separator: Separator,
 }
 
 /// [`ViewOptions::max_length`] の既定値
@@ -51,11 +59,22 @@ impl Default for ViewOptions {
             blocked_first: false,
             max_length: Some(DEFAULT_MAX_LENGTH),
             show_cwd: false,
+            nerd_font: false,
+            separator: Separator::default(),
         }
     }
 }
 
 impl ViewOptions {
+    /// エージェント同士の区切り
+    fn separator_text(&self) -> &'static str {
+        if self.nerd_font {
+            self.separator.text()
+        } else {
+            PLAIN_SEPARATOR
+        }
+    }
+
     /// このエージェントを表示するか。表示するエージェントの条件はここに集める
     /// （[`layout()`] と、一覧が空かどうかを見る `main.rs` の両方が使う）。
     pub fn shows(&self, agent: &AgentStatus) -> bool {
@@ -169,6 +188,19 @@ pub(crate) mod tests {
         let visible = strip_ansi(&line);
         assert_eq!(visible.width(), 20);
         assert_eq!(visible.trim_end(), " ✗ claude");
+
+        // Nerd Font モードの app のアイコンは前景色で、太字にしない
+        let mut a = agent(1, AgentState::Error);
+        a.app = Some("claude-code".to_owned());
+        let nerd = ViewOptions {
+            nerd_font: true,
+            ..Default::default()
+        };
+        let line = render_line(&[a], 20, &theme, &nerd);
+        assert!(
+            line.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
+            "{line:?}"
+        );
     }
 
     #[test]
