@@ -10,6 +10,11 @@ pub enum IconStyle {
     Symbol,
     /// アルファベット 1 文字。記号のフォントがない環境向け。
     Alphabet,
+    /// 絵文字。幅は 2 桁。
+    /// 端末による幅のずれを避けるため、East Asian Width が W で、異体字セレクタ（U+FE0F）なしで
+    /// 絵文字表示になる文字（Emoji_Presentation）だけを使う。
+    /// 絵文字は前景色で塗っても色が変わらないので、状態の色では区別できない。
+    Emoji,
 }
 
 impl IconStyle {
@@ -25,6 +30,11 @@ impl IconStyle {
             (IconStyle::Alphabet, AgentState::Blocked) => "B",
             (IconStyle::Alphabet, AgentState::Done) => "D",
             (IconStyle::Alphabet, AgentState::Error) => "E",
+            (IconStyle::Emoji, AgentState::Idle) => "💤",
+            (IconStyle::Emoji, AgentState::Working) => "⏳",
+            (IconStyle::Emoji, AgentState::Blocked) => "❗",
+            (IconStyle::Emoji, AgentState::Done) => "✅",
+            (IconStyle::Emoji, AgentState::Error) => "❌",
         }
     }
 }
@@ -34,18 +44,31 @@ mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
 
+    const STATES: [AgentState; 5] = [
+        AgentState::Idle,
+        AgentState::Working,
+        AgentState::Blocked,
+        AgentState::Done,
+        AgentState::Error,
+    ];
+
     #[test]
     fn symbols_are_one_column_wide() {
-        for state in [
-            AgentState::Idle,
-            AgentState::Working,
-            AgentState::Blocked,
-            AgentState::Done,
-            AgentState::Error,
-        ] {
+        for state in STATES {
             assert_eq!(IconStyle::Symbol.icon(state).width(), 1, "{state:?}");
             // 端末によって幅が変わらないこと（Ambiguous でないこと）
             assert_eq!(IconStyle::Symbol.icon(state).width_cjk(), 1, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn emojis_are_two_columns_wide_without_variation_selector() {
+        for state in STATES {
+            let icon = IconStyle::Emoji.icon(state);
+            // 1 文字だけで、異体字セレクタ（U+FE0F）に頼らないこと
+            assert_eq!(icon.chars().count(), 1, "{state:?}");
+            assert_eq!(icon.width(), 2, "{state:?}");
+            assert_eq!(icon.width_cjk(), 2, "{state:?}");
         }
     }
 }

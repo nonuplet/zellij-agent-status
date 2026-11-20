@@ -280,24 +280,53 @@ mod tests {
         assert_eq!(plain(&[a], 80), " ⟳ 42% claude");
     }
 
+    fn icons(icons: IconStyle) -> ViewOptions {
+        ViewOptions {
+            icons,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn icon_per_state() {
         let cases = [
-            (AgentState::Idle, "◌", "I"),
-            (AgentState::Working, "⟳", "W"),
-            (AgentState::Blocked, "!", "B"),
-            (AgentState::Done, "✓", "D"),
-            (AgentState::Error, "✗", "E"),
+            (AgentState::Idle, "◌", "I", "💤"),
+            (AgentState::Working, "⟳", "W", "⏳"),
+            (AgentState::Blocked, "!", "B", "❗"),
+            (AgentState::Done, "✓", "D", "✅"),
+            (AgentState::Error, "✗", "E", "❌"),
         ];
-        let alphabet = ViewOptions {
-            icons: IconStyle::Alphabet,
-            ..Default::default()
-        };
-        for (state, symbol, letter) in cases {
+        let alphabet = icons(IconStyle::Alphabet);
+        let emoji = icons(IconStyle::Emoji);
+        for (state, symbol, letter, emoji_icon) in cases {
             let a = [agent(1, state)];
             assert_eq!(plain(&a, 80), format!(" {symbol} claude"));
             assert_eq!(plain_with(&a, 80, &alphabet), format!(" {letter} claude"));
+            assert_eq!(plain_with(&a, 80, &emoji), format!(" {emoji_icon} claude"));
         }
+    }
+
+    #[test]
+    fn emoji_icons_are_counted_as_two_columns() {
+        let emoji = icons(IconStyle::Emoji);
+        let mut a = agent(1, AgentState::Working);
+        a.title = Some("long-project-name".to_owned());
+        let b = agent(2, AgentState::Done);
+        // 名前に回せる幅は 11（記号のときより 2 少ない）：均等に分けて短い "claude" に 5、残り 6 を長い方へ
+        assert_eq!(
+            plain_with(&[a.clone(), b.clone()], 20, &emoji),
+            " ⏳ long-~  ✅ clau~"
+        );
+        assert_eq!(plain_with(&[a, b], 14, &emoji), " ⏳  ✅");
+    }
+
+    #[test]
+    fn emoji_icon_is_not_split_at_line_end() {
+        let emoji = icons(IconStyle::Emoji);
+        let agents: Vec<_> = (0..5).map(|i| agent(i, AgentState::Idle)).collect();
+        assert_eq!(plain_with(&agents, 8, &emoji), " 💤  💤~");
+        // 残り 1 桁には幅 2 のアイコンが入らないので、その手前で切る
+        assert_eq!(plain_with(&agents, 7, &emoji), " 💤  ~");
     }
 
     #[test]
@@ -409,9 +438,11 @@ mod tests {
         ];
         agents[0].progress = Some(100);
         agents[2].title = Some("全角のタイトル".to_owned());
-        for cols in 0..100 {
-            let text = plain(&agents, cols);
-            assert!(text.width() <= cols, "cols={cols}: {text:?}");
+        for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
+            for cols in 0..100 {
+                let text = plain_with(&agents, cols, &icons(style));
+                assert!(text.width() <= cols, "{style:?} cols={cols}: {text:?}");
+            }
         }
     }
 
