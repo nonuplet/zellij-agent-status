@@ -12,7 +12,7 @@
 //!
 //! | キー | 既定値 | 内容 |
 //! |---|---|---|
-//! | `icon_style` | `symbol` | アイコンを記号（`symbol`）にするか、アルファベット 1 文字（`alphabet`）にするか |
+//! | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
 //!
 //! 表示の並びや切り詰めは view（`src/view/layout.rs`）で固定しているので、設定では変えられない。
@@ -39,7 +39,7 @@ impl Config {
             match parse_icon_style(value) {
                 Some(icons) => config.view.icons = icons,
                 None => warnings.push(format!(
-                    "icon_style: `{value}` は使えません。`symbol` か `alphabet` を指定してください（既定値を使います）"
+                    "icon_style: `{value}` は使えません。`symbol`・`alphabet`・`emoji` のどれかを指定してください（既定値を使います）"
                 )),
             }
         }
@@ -56,6 +56,7 @@ fn parse_icon_style(value: &str) -> Option<IconStyle> {
     match value {
         "symbol" => Some(IconStyle::Symbol),
         "alphabet" => Some(IconStyle::Alphabet),
+        "emoji" => Some(IconStyle::Emoji),
         _ => None,
     }
 }
@@ -94,6 +95,7 @@ mod tests {
         let cases = [
             ("symbol", IconStyle::Symbol),
             ("alphabet", IconStyle::Alphabet),
+            ("emoji", IconStyle::Emoji),
         ];
         for (value, expected) in cases {
             let (config, warnings) =
@@ -106,7 +108,7 @@ mod tests {
     #[test]
     fn unknown_icon_style_falls_back_to_default_with_warning() {
         let (config, warnings) = Config::from_configuration(&configuration(&[
-            ("icon_style", "emoji"),
+            ("icon_style", "emoticon"),
             ("apps", "claude"),
         ]));
         assert_eq!(config.view.icons, IconStyle::Symbol);
