@@ -1,6 +1,9 @@
 //! レイアウト：どのエージェントを、どの順で、どの文字列をどの役割で並べるかを決める。
 //!
-//! 幅が足りないときは、次の順に縮める。
+//! [`ViewOptions::max_length`] を指定しているときは、まず 1 エージェント分（アイコン・進捗を含む）を
+//! その幅に収める。msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて名前を切り詰める。
+//!
+//! そのうえで行の幅が足りないときは、次の順に縮める。
 //! 1. msg を各エージェントで均等に切り詰める
 //! 2. msg を省き、名前を均等に切り詰める
 //! 3. アイコン（と進捗）だけにする
@@ -21,6 +24,13 @@ const ELLIPSIS: char = '~';
 /// 切り詰めた msg / 名前がこの幅を下回るなら、切り詰めずに次の段階へ進む
 const MIN_MSG_WIDTH: usize = 6;
 const MIN_NAME_WIDTH: usize = 4;
+/// [`ViewOptions::max_length`] の下限。
+/// アイコン（最大 2）と進捗（最大 ` 255%` の 5）に、名前の前の空白と [`MIN_NAME_WIDTH`] を足した幅。
+///
+/// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
+/// - アイコンと進捗だけで上限を超えることがある（例：絵文字アイコン + ` 100%` で 7）
+/// - 上限に収めるために、名前が [`MIN_NAME_WIDTH`] より短く切り詰められて見分けられなくなる
+pub const MIN_MAX_LENGTH: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Role {
@@ -81,6 +91,26 @@ impl Item {
         self.icon.width() + self.progress.as_ref().map_or(0, |p| 1 + p.width())
     }
 
+    /// (名前の幅, msg の幅) の上限。`max_length` を指定していれば、1 エージェント分がその幅に収まるようにする。
+    /// msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて名前を切り詰める。
+    fn widths(&self, max_length: Option<usize>) -> (usize, Option<usize>) {
+        let name = self.name.width();
+        let msg = self.msg.as_ref().map(|m| m.width());
+        let Some(max_length) = max_length else {
+            return (name, msg);
+        };
+        // 名前（と msg）に使える幅。名前の前の空白を除く
+        let room = max_length.saturating_sub(self.head_width() + 1);
+        // msg の前の ": "
+        if let Some(msg) = msg
+            && let Some(msg_room) = room.checked_sub(name + 2)
+            && (msg <= msg_room || msg_room >= MIN_MSG_WIDTH)
+        {
+            return (name, Some(msg.min(msg_room)));
+        }
+        (name.min(room), None)
+    }
+
     /// `name` / `msg` は表示する幅の上限。None なら表示しない。
     fn spans(&self, name: Option<usize>, msg: Option<usize>) -> Vec<Span> {
         let mut spans = vec![Span::new(self.icon, Role::State(self.state))];
@@ -134,7 +164,8 @@ pub(super) fn layout<'a>(
     }
 
     let mut spans = vec![Span::new(PAD, Role::Plain)];
-    for (i, (item, (name, msg))) in items.iter().zip(plan(&items, cols)).enumerate() {
+    let plans = plan(&items, cols, options.max_length);
+    for (i, (item, (name, msg))) in items.iter().zip(plans).enumerate() {
         if i > 0 {
             spans.push(Span::new(SEP, Role::Plain));
         }
@@ -144,28 +175,31 @@ pub(super) fn layout<'a>(
 }
 
 /// 各エージェントの (名前の幅, msg の幅) を決める。None は表示しない。
-fn plan(items: &[Item], cols: usize) -> Vec<(Option<usize>, Option<usize>)> {
+/// [`Item::widths`] で `max_length` に収めた幅を、行の幅に合わせてさらに縮める。
+fn plan(
+    items: &[Item],
+    cols: usize,
+    max_length: Option<usize>,
+) -> Vec<(Option<usize>, Option<usize>)> {
     let fixed = PAD.width()
         + SEP.width() * (items.len() - 1)
         + items.iter().map(Item::head_width).sum::<usize>();
-    let names: Vec<usize> = items.iter().map(|i| i.name.width()).collect();
+    let (names, msgs): (Vec<usize>, Vec<Option<usize>>) =
+        items.iter().map(|i| i.widths(max_length)).unzip();
     // 名前の前の空白を含む
     let names_total = names.iter().map(|w| 1 + w).sum::<usize>();
-    let msgs: Vec<usize> = items
-        .iter()
-        .filter_map(|i| i.msg.as_ref().map(|m| m.width()))
-        .collect();
+    let shown_msgs: Vec<usize> = msgs.iter().flatten().copied().collect();
     // msg の前の ": "
-    let msgs_overhead = 2 * msgs.len();
+    let msgs_overhead = 2 * shown_msgs.len();
 
     if let Some(room) = cols.checked_sub(fixed + names_total + msgs_overhead)
-        && let Some(shares) = fit(&msgs, room, MIN_MSG_WIDTH)
+        && let Some(shares) = fit(&shown_msgs, room, MIN_MSG_WIDTH)
     {
         let mut shares = shares.into_iter();
-        return items
-            .iter()
-            .zip(names)
-            .map(|(item, name)| (Some(name), item.msg.as_ref().and_then(|_| shares.next())))
+        return names
+            .into_iter()
+            .zip(msgs)
+            .map(|(name, msg)| (Some(name), msg.and_then(|_| shares.next())))
             .collect();
     }
 
@@ -580,6 +614,136 @@ mod tests {
             for cols in 0..100 {
                 let text = plain_with(&agents, cols, &icons(style));
                 assert!(text.width() <= cols, "{style:?} cols={cols}: {text:?}");
+            }
+        }
+    }
+
+    fn max_length(max_length: usize) -> ViewOptions {
+        ViewOptions {
+            max_length: Some(max_length),
+            ..Default::default()
+        }
+    }
+
+    /// 各エージェント分の幅（行頭の余白と区切りを除く）
+    fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<usize> {
+        let mut widths = vec![0];
+        for span in layout(agents, cols, options).into_iter().skip(1) {
+            if span.role == Role::Plain && span.text == SEP {
+                widths.push(0);
+            } else {
+                *widths.last_mut().unwrap() += span.text.width();
+            }
+        }
+        widths
+    }
+
+    #[test]
+    fn max_length_truncates_msg_first() {
+        let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
+        let b = with_msg(agent(2, AgentState::Blocked), "short");
+        // "⟳ claude: " (10) + msg 10 = 20。短い方はそのまま
+        assert_eq!(
+            plain_with(&[a, b], 80, &max_length(20)),
+            " ⟳ claude: abcdefghi~  ! claude: short"
+        );
+    }
+
+    #[test]
+    fn max_length_drops_msg_then_truncates_name() {
+        let mut a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
+        // msg に回せる幅が 4（MIN_MSG_WIDTH 未満）なので省く
+        assert_eq!(plain_with(&[a.clone()], 80, &max_length(14)), " ⟳ claude");
+        // 収まる msg なら MIN_MSG_WIDTH 未満の幅でも表示する
+        let short = with_msg(agent(1, AgentState::Working), "ok");
+        assert_eq!(plain_with(&[short], 80, &max_length(14)), " ⟳ claude: ok");
+
+        a.title = Some("long-project-name".to_owned());
+        assert_eq!(plain_with(&[a], 80, &max_length(14)), " ⟳ long-projec~");
+    }
+
+    #[test]
+    fn max_length_counts_icon_and_progress() {
+        let mut a = with_msg(agent(1, AgentState::Working), "Running");
+        a.progress = Some(100);
+        assert_eq!(
+            plain_with(&[a.clone()], 80, &max_length(MIN_MAX_LENGTH)),
+            " ⟳ 100% clau~"
+        );
+        let emoji = ViewOptions {
+            icons: IconStyle::Emoji,
+            ..max_length(MIN_MAX_LENGTH)
+        };
+        assert_eq!(plain_with(&[a], 80, &emoji), " ⏳ 100% cla~");
+    }
+
+    #[test]
+    fn max_length_is_combined_with_row_width() {
+        let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
+        let b = with_msg(agent(2, AgentState::Blocked), "short");
+        let options = max_length(20);
+        // 上限で切り詰めた幅（msg 10 と 5）を、行の幅に合わせてさらに均等に縮める
+        assert_eq!(
+            plain_with(&[a.clone(), b.clone()], 36, &options),
+            " ⟳ claude: abcdefg~  ! claude: short"
+        );
+        assert_eq!(plain_with(&[a, b], 20, &options), " ⟳ claude  ! claude");
+    }
+
+    #[test]
+    fn max_length_defaults_to_30_and_none_is_unlimited() {
+        let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrstuvwxyz");
+        // "⟳ claude: " (10) + msg 20 = 30
+        assert_eq!(
+            plain(std::slice::from_ref(&a), 80),
+            " ⟳ claude: abcdefghijklmnopqrs~"
+        );
+        let unlimited = ViewOptions {
+            max_length: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            plain_with(&[a], 80, &unlimited),
+            " ⟳ claude: abcdefghijklmnopqrstuvwxyz"
+        );
+    }
+
+    #[test]
+    fn max_length_leaves_short_agents_unchanged() {
+        let a = with_msg(agent(1, AgentState::Done), "ok");
+        assert_eq!(plain_with(&[a], 80, &max_length(40)), " ✓ claude: ok");
+    }
+
+    #[test]
+    fn min_max_length_fits_widest_head_and_min_name() {
+        let mut a = agent(1, AgentState::Working);
+        a.progress = Some(u8::MAX);
+        let item = Item::new(&a, &icons(IconStyle::Emoji));
+        assert!(item.head_width() + 1 + MIN_NAME_WIDTH <= MIN_MAX_LENGTH);
+    }
+
+    #[test]
+    fn never_exceeds_max_length() {
+        let mut agents = vec![
+            with_msg(agent(1, AgentState::Working), "テストを実行しています"),
+            with_msg(agent(2, AgentState::Blocked), "Allow Bash(cargo test)?"),
+            agent(3, AgentState::Done),
+        ];
+        agents[0].progress = Some(100);
+        agents[2].title = Some("全角のタイトル".to_owned());
+        for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
+            for max in MIN_MAX_LENGTH..40 {
+                let options = ViewOptions {
+                    icons: style,
+                    ..max_length(max)
+                };
+                for cols in 0..100 {
+                    let text = plain_with(&agents, cols, &options);
+                    assert!(text.width() <= cols, "{style:?} max={max} cols={cols}");
+                    for width in agent_widths(&agents, cols, &options) {
+                        assert!(width <= max, "{style:?} max={max} cols={cols}: {text:?}");
+                    }
+                }
             }
         }
     }

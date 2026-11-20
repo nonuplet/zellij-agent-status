@@ -9,6 +9,7 @@
 //!     apps "claude-code, codex"
 //!     show_app "false"
 //!     blocked_first "true"
+//!     max_length 40
 //! }
 //! ```
 //!
@@ -18,18 +19,19 @@
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
 //! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
+//! | `max_length` | `30` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
 //! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
 //!
-//! 表示の並びは `blocked_first` 以外では変えられない。切り詰めは view（`src/view/layout.rs`）で固定している。
+//! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/layout.rs`）で固定している。
 //!
 //! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。
 
 use std::collections::BTreeMap;
 
-use crate::view::{IconStyle, ViewOptions};
+use crate::view::{DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, ViewOptions};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -73,7 +75,26 @@ impl Config {
             }
         }
 
+        if let Some(value) = configuration.get("max_length") {
+            match parse_max_length(value) {
+                Some(max_length) => config.view.max_length = max_length,
+                None => warnings.push(format!(
+                    "max_length: `{value}` は使えません。0（上限なし）か {MIN_MAX_LENGTH} 以上の整数を指定してください（既定値 {DEFAULT_MAX_LENGTH} を使います）"
+                )),
+            }
+        }
+
         (config, warnings)
+    }
+}
+
+/// 0 は上限なし（`Some(None)`）。不正な値は None。
+/// 1 以上 [`MIN_MAX_LENGTH`] 未満は、アイコンと進捗だけで上限を超えることがあるので受け付けない。
+fn parse_max_length(value: &str) -> Option<Option<usize>> {
+    match value.parse().ok()? {
+        0 => Some(None),
+        max_length if max_length >= MIN_MAX_LENGTH => Some(Some(max_length)),
+        _ => None,
     }
 }
 
@@ -123,6 +144,7 @@ mod tests {
         assert_eq!(config.view.apps, None);
         assert!(config.view.show_app);
         assert!(!config.view.blocked_first);
+        assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
     }
 
     #[test]
@@ -147,6 +169,36 @@ mod tests {
             assert!(!config.view.show_app, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("blocked_first:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn max_length() {
+        let cases = [("40", Some(40)), ("12", Some(MIN_MAX_LENGTH)), ("0", None)];
+        for (value, expected) in cases {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("max_length", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.max_length, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_max_length_falls_back_to_default_with_warning() {
+        for value in ["abc", "1", "11", "-1", "40.5", " 40", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("max_length", value),
+                ("apps", "claude"),
+            ]));
+            assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH), "{value}");
+            // 他のキーは影響を受けない
+            assert_eq!(
+                config.view.apps,
+                Some(vec!["claude".to_string()]),
+                "{value}"
+            );
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("max_length:"), "{value}");
         }
     }
 
