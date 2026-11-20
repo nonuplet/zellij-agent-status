@@ -8,6 +8,7 @@
 //!     icon_style "alphabet"
 //!     apps "claude-code, codex"
 //!     show_app "false"
+//!     blocked_first "true"
 //! }
 //! ```
 //!
@@ -16,11 +17,12 @@
 //! | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
 //! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
+//! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
 //! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
 //!
-//! 表示の並びや切り詰めは view（`src/view/layout.rs`）で固定しているので、設定では変えられない。
+//! 表示の並びは `blocked_first` 以外では変えられない。切り詰めは view（`src/view/layout.rs`）で固定している。
 //!
 //! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。
@@ -58,6 +60,15 @@ impl Config {
                 Some(show_app) => config.view.show_app = show_app,
                 None => warnings.push(format!(
                     "show_app: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
+        if let Some(value) = configuration.get("blocked_first") {
+            match parse_bool(value) {
+                Some(blocked_first) => config.view.blocked_first = blocked_first,
+                None => warnings.push(format!(
+                    "blocked_first: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
                 )),
             }
         }
@@ -111,6 +122,32 @@ mod tests {
         assert_eq!(config.view.icons, IconStyle::Symbol);
         assert_eq!(config.view.apps, None);
         assert!(config.view.show_app);
+        assert!(!config.view.blocked_first);
+    }
+
+    #[test]
+    fn blocked_first() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("blocked_first", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.blocked_first, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_blocked_first_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("blocked_first", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.blocked_first, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("blocked_first:"), "{value}");
+        }
     }
 
     #[test]

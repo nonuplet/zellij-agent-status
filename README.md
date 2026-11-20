@@ -20,6 +20,7 @@ pane size=1 borderless=true {
         icon_style "alphabet"
         apps "claude-code"
         show_app "false"
+        blocked_first "true"
     }
 }
 ```
@@ -29,6 +30,7 @@ pane size=1 borderless=true {
 | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか。絵文字は状態の色で塗られない |
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
 | `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
+| `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
 
 不正な値は既定値に戻し、エージェントがいないときにプラグインの行へ警告を出します。
 
