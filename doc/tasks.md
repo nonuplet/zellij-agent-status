@@ -50,6 +50,7 @@ pub struct ProgramStatusRecord {
 - `&[AgentStatus]` と幅から1行の文字列を作る。
 - 状態ごとのアイコンと色（`ModeUpdate` のパレットを使う）、表示幅を考えた切り詰め、複数エージェントの並べ方。
 - 副作用のない関数にしてテストする。
+- 実装済み（`src/view.rs`）。使う側が知っておくことは [view-notes.md](view-notes.md) にまとめてある。
 
 ### C. 設定
 
