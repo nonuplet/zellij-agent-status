@@ -13,6 +13,7 @@ mod paint;
 mod theme;
 
 pub use icon::IconStyle;
+pub use layout::MIN_MAX_LENGTH;
 pub use theme::Theme;
 
 use crate::model::AgentStatus;
@@ -30,9 +31,15 @@ pub struct ViewOptions {
     pub show_app: bool,
     /// `Blocked` のエージェントを先頭に並べるか（[`layout()`] の並べ替え）
     pub blocked_first: bool,
+    /// 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。None なら上限なし。
+    /// [`MIN_MAX_LENGTH`] 以上であること（config で検証する）。
+    pub max_length: Option<usize>,
 }
 
-// show_app の既定値を true にするため、derive せずに書く
+/// [`ViewOptions::max_length`] の既定値
+pub const DEFAULT_MAX_LENGTH: usize = 30;
+
+// show_app などの既定値を指定するため、derive せずに書く
 impl Default for ViewOptions {
     fn default() -> Self {
         ViewOptions {
@@ -40,6 +47,7 @@ impl Default for ViewOptions {
             apps: None,
             show_app: true,
             blocked_first: false,
+            max_length: Some(DEFAULT_MAX_LENGTH),
         }
     }
 }
