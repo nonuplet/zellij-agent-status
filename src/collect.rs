@@ -7,6 +7,11 @@
 //! レコードは送信元のプログラムが終わると Zellij が消すので、古いレコードの掃除はしない。
 //!
 //! 一覧はペイン id をキーにした HashMap で持ち、順序は持たない。表示の並び順は view で決める。
+//!
+//! タブ名は `TabUpdate` で別に届く。`PaneManifest.panes` のキーは `TabInfo.position` と同じ
+//! （zellij-server が `tab.position` をキーにして作っている）ので、位置でタブ名を引いて付ける。
+//! `TabUpdate` と `PaneUpdate` は届く順序が決まっていないため、タブ名の表を持っておき、
+//! どちらが届いても付け直す。タブを移動した直後などで一時的にずれても、もう一方が届けば正しくなる。
 
 use std::collections::HashMap;
 
@@ -28,6 +33,8 @@ pub enum Permission {
 #[derive(Debug, Default)]
 pub struct Collector {
     permission: Permission,
+    /// 最後に届いた `TabUpdate` の、タブの位置 → タブ名
+    tab_names: HashMap<usize, String>,
     /// キーはペイン id（ターミナルペインの id はタブをまたいでも一意）
     statuses: HashMap<u32, AgentStatus>,
 }
@@ -39,7 +46,11 @@ impl Collector {
     /// selectable のままにしておく（unselectable にするのは `update` で許可を受け取ったとき）。
     pub fn load(&self) {
         request_permission(&[PermissionType::ReadApplicationState]);
-        subscribe(&[EventType::PermissionRequestResult, EventType::PaneUpdate]);
+        subscribe(&[
+            EventType::PermissionRequestResult,
+            EventType::PaneUpdate,
+            EventType::TabUpdate,
+        ]);
     }
 
     /// `ZellijPlugin::update` から呼ぶ。再描画が必要なときに true を返す。
@@ -73,41 +84,68 @@ impl Collector {
                 self.permission = permission;
                 changed
             }
-            Event::PaneUpdate(manifest) => {
-                // PaneUpdate はフォーカス移動などでも届くので、変化がなければ再描画しない。
-                // HashMap 同士の比較は順序に依存しないので、manifest の走査順の違いは変化として扱われない
-                let statuses = collect(manifest);
-                let changed = self.statuses != statuses;
-                self.statuses = statuses;
-                changed
+            Event::PaneUpdate(manifest) => self.replace(collect(manifest, &self.tab_names)),
+            Event::TabUpdate(tabs) => {
+                self.tab_names = tab_names(tabs);
+                let mut statuses = self.statuses.clone();
+                for status in statuses.values_mut() {
+                    status.tab_name = self.tab_names.get(&status.tab).cloned();
+                }
+                self.replace(statuses)
             }
             _ => false,
         }
     }
+
+    /// 一覧を置き換え、変化があれば true を返す。
+    /// `PaneUpdate` / `TabUpdate` はフォーカス移動などでも届くので、変化がなければ再描画しない。
+    /// HashMap 同士の比較は順序に依存しないので、manifest の走査順の違いは変化として扱われない。
+    fn replace(&mut self, statuses: HashMap<u32, AgentStatus>) -> bool {
+        let changed = self.statuses != statuses;
+        self.statuses = statuses;
+        changed
+    }
+}
+
+/// タブの位置（`TabInfo.position`）→ タブ名。
+fn tab_names(tabs: &[TabInfo]) -> HashMap<usize, String> {
+    tabs.iter()
+        .map(|tab| (tab.position, tab.name.clone()))
+        .collect()
 }
 
 /// `PaneManifest` から、ルートレコードを持つターミナルペインを `AgentStatus` にする。
-/// キーはペイン id。
-pub fn collect(manifest: &PaneManifest) -> HashMap<u32, AgentStatus> {
+/// キーはペイン id。タブ名は `tab_names`（タブの位置 → タブ名）から引く。
+pub fn collect(
+    manifest: &PaneManifest,
+    tab_names: &HashMap<usize, String>,
+) -> HashMap<u32, AgentStatus> {
     manifest
         .panes
         .iter()
         .flat_map(|(&tab, panes)| {
+            let tab_name = tab_names.get(&tab);
             panes
                 .iter()
                 .filter(|pane| !pane.is_plugin)
                 .filter_map(move |pane| {
                     let record = pane.program_status.iter().find(|r| r.is_root())?;
-                    Some((pane.id, to_status(tab, pane.id, record)))
+                    Some((pane.id, to_status(tab, tab_name, pane.id, record)))
                 })
         })
         .collect()
 }
 
-fn to_status(tab: usize, pane_id: u32, record: &ProgramStatusRecord) -> AgentStatus {
+fn to_status(
+    tab: usize,
+    tab_name: Option<&String>,
+    pane_id: u32,
+    record: &ProgramStatusRecord,
+) -> AgentStatus {
     AgentStatus {
         pane_id,
         tab,
+        tab_name: tab_name.cloned(),
         // OSC 7501 では state が必須なので通常は Some。None のときは Zellij 側の解釈（Idle）に合わせる
         state: AgentState::from(record.state()),
         kind: record.kind,
@@ -146,6 +184,93 @@ mod tests {
         }
     }
 
+    fn tab_update(tabs: &[(usize, &str)]) -> Event {
+        Event::TabUpdate(
+            tabs.iter()
+                .map(|&(position, name)| TabInfo {
+                    position,
+                    name: name.to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+        )
+    }
+
+    fn tab_name_of(collector: &Collector, pane_id: u32) -> Option<&str> {
+        collector
+            .statuses()
+            .find(|s| s.pane_id == pane_id)
+            .and_then(|s| s.tab_name.as_deref())
+    }
+
+    #[test]
+    fn tab_without_name_entry_has_no_tab_name() {
+        let working = || vec![record(None, ProgramState::Working)];
+        let m = manifest(vec![
+            (0, vec![terminal(1, working())]),
+            (1, vec![terminal(2, working())]),
+        ]);
+        let names = HashMap::from([(0, "main".to_owned())]);
+
+        let statuses = collect(&m, &names);
+        assert_eq!(statuses[&1].tab_name.as_deref(), Some("main"));
+        assert_eq!(statuses[&2].tab_name, None);
+    }
+
+    #[test]
+    fn tab_name_is_attached_when_tab_update_comes_first() {
+        let mut collector = Collector::default();
+        assert!(!collector.apply(&tab_update(&[(0, "main"), (1, "work")])));
+
+        let m = manifest(vec![(
+            1,
+            vec![terminal(4, vec![record(None, ProgramState::Working)])],
+        )]);
+        assert!(collector.apply(&Event::PaneUpdate(m)));
+        assert_eq!(tab_name_of(&collector, 4), Some("work"));
+    }
+
+    #[test]
+    fn tab_name_is_attached_when_pane_update_comes_first() {
+        let mut collector = Collector::default();
+        let m = manifest(vec![(
+            1,
+            vec![terminal(4, vec![record(None, ProgramState::Working)])],
+        )]);
+        assert!(collector.apply(&Event::PaneUpdate(m)));
+        assert_eq!(tab_name_of(&collector, 4), None);
+
+        assert!(collector.apply(&tab_update(&[(0, "main"), (1, "work")])));
+        assert_eq!(tab_name_of(&collector, 4), Some("work"));
+    }
+
+    #[test]
+    fn tab_rename_and_move_are_reflected() {
+        let mut collector = Collector::default();
+        let working = || vec![record(None, ProgramState::Working)];
+        collector.apply(&tab_update(&[(0, "main"), (1, "work")]));
+        collector.apply(&Event::PaneUpdate(manifest(vec![
+            (0, vec![terminal(1, working())]),
+            (1, vec![terminal(2, working())]),
+        ])));
+
+        // タブ名の変更
+        assert!(collector.apply(&tab_update(&[(0, "main"), (1, "review")])));
+        assert_eq!(tab_name_of(&collector, 2), Some("review"));
+
+        // 名前に関係ない TabUpdate（フォーカス移動など）では再描画しない
+        assert!(!collector.apply(&tab_update(&[(0, "main"), (1, "review")])));
+
+        // タブの入れ替え：TabUpdate が先に届くと一時的にずれるが、PaneUpdate で正しくなる
+        collector.apply(&tab_update(&[(0, "review"), (1, "main")]));
+        collector.apply(&Event::PaneUpdate(manifest(vec![
+            (0, vec![terminal(2, working())]),
+            (1, vec![terminal(1, working())]),
+        ])));
+        assert_eq!(tab_name_of(&collector, 1), Some("main"));
+        assert_eq!(tab_name_of(&collector, 2), Some("review"));
+    }
+
     #[test]
     fn converts_all_fields_of_root_record() {
         let root = ProgramStatusRecord {
@@ -159,14 +284,16 @@ mod tests {
             updated_ms: 1234,
         };
         let m = manifest(vec![(1, vec![terminal(7, vec![root])])]);
+        let names = HashMap::from([(0, "main".to_owned()), (1, "work".to_owned())]);
 
         assert_eq!(
-            collect(&m),
+            collect(&m, &names),
             HashMap::from([(
                 7,
                 AgentStatus {
                     pane_id: 7,
                     tab: 1,
+                    tab_name: Some("work".to_owned()),
                     state: AgentState::Blocked,
                     kind: Some(BlockedKind::Permission),
                     progress: Some(42),
@@ -192,7 +319,7 @@ mod tests {
             )],
         )]);
 
-        let statuses = collect(&m);
+        let statuses = collect(&m, &HashMap::new());
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[&1].state, AgentState::Working);
     }
@@ -207,7 +334,7 @@ mod tests {
             ],
         )]);
 
-        assert!(collect(&m).is_empty());
+        assert!(collect(&m, &HashMap::new()).is_empty());
     }
 
     #[test]
@@ -216,7 +343,7 @@ mod tests {
         plugin.is_plugin = true;
         let m = manifest(vec![(0, vec![plugin])]);
 
-        assert!(collect(&m).is_empty());
+        assert!(collect(&m, &HashMap::new()).is_empty());
     }
 
     #[test]
@@ -224,7 +351,7 @@ mod tests {
         let root = ProgramStatusRecord::default();
         let m = manifest(vec![(0, vec![terminal(1, vec![root])])]);
 
-        assert_eq!(collect(&m)[&1].state, AgentState::Idle);
+        assert_eq!(collect(&m, &HashMap::new())[&1].state, AgentState::Idle);
     }
 
     #[test]
@@ -236,7 +363,7 @@ mod tests {
             (1, vec![terminal(1, working())]),
         ]);
 
-        let statuses = collect(&m);
+        let statuses = collect(&m, &HashMap::new());
         assert_eq!(statuses.len(), 4);
         assert_eq!(statuses[&1].tab, 1);
         assert_eq!(statuses[&5].tab, 2);

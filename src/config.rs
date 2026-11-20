@@ -15,7 +15,7 @@
 //! |---|---|---|
 //! | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
-//! | `show_app` | `true` | `title` がないときに `app` を名前として表示するか。`false` なら `#<pane_id>` を表示する |
+//! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
 //! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
