@@ -16,8 +16,11 @@
 #   StopFailure                     → error（msg：エラー内容）
 #   SessionEnd                      → clear
 #
-# 制約：Esc での中断では Stop が呼ばれないので、working（または blocked）のまま残る。
-#       次にプロンプトを送ると working に戻る。
+# 制約：
+#   - Esc での中断では Stop が呼ばれないので、working（または blocked）のまま残る。
+#     次にプロンプトを送ると working に戻る。
+#   - 許可ダイアログで拒否した後にどのイベントが届くかは未確認。blocked のまま残る可能性がある。
+#   - app は常に claude。プラグインの設定で apps を指定するときは claude を含める。
 #
 # 環境変数 OSC7501_TTY で書き込み先を変えられる（動作確認用。既定は /dev/tty）。
 
