@@ -63,15 +63,13 @@ pub struct ProgramStatusRecord {
 ### D. 送信側とテスト用ツール
 
 - OSC 7501 を送る手動テスト用スクリプト。
-- Claude Code の hooks から送る例。hooks の stdout は端末につながっていないので、`/dev/tty` に書く（子プロセスから書いても受理されることは T0 で確認済み）。
 - 成果物
   - `scripts/osc7501.sh`：1 件送る。送信元が終わるとレコードが消えるので、既定では送信後に Enter 待ちでとどまる。
   - `scripts/osc7501-demo.sh`：全状態を順に送り続ける（B の表示確認用）。
-  - `examples/claude-code/`：hook スクリプト（`hook.sh`、jq が必要）と設定例（`settings.json`）。イベントと状態の対応は `hook.sh` の冒頭に書いてある。
-- 未確認（E で確認する）
-  - 実際の Claude Code から hook が `/dev/tty` に書けるか（hook のプロセスが制御端末を持つか）。
-  - 許可ダイアログで拒否した後にどのイベントが届くか。届かなければ blocked のまま残る。
-  - `UserPromptSubmit` の `prompt` フィールド。hooks のドキュメントの該当節を読めておらず、名前を確かめていない。違っていても msg が空になるだけ。
+- Claude Code の hooks から送る例（`examples/claude-code/`）も作ったが、E で削除した。
+  - Claude Code の最新版は OSC 7501 を自分で送るので、hooks は不要。hooks なしでプラグインに表示されることを実機で確認した。
+  - そもそも hooks からは `/dev/tty` に書けない見込み（[osc7501-findings.md](osc7501-findings.md) の「Claude Code の hooks から送る場合」）。
+  - 中身はコミット `c6bf100` / `53d7179` に残っている。
 
 ## フェーズ2：統合
 
@@ -81,6 +79,25 @@ pub struct ProgramStatusRecord {
 - `dev.kdl` で動作を確認する。
 - T0 の probe（`src/probe.rs`、`t0.kdl`、`scripts/t0-cases*.sh`）を削除する。削除するなら、[osc7501-findings.md](osc7501-findings.md) の「再現方法」も合わせて直す。
 - README には必要なことだけ追記する。
+- 実施済み
+  - `main.rs` で A・B・C をつないだ。`ModeUpdate` で色を更新し、`apps` の絞り込みは表示の直前に行う。
+  - permission の応答待ち・拒否時と、エージェントがいないときの設定の警告は、`view::render_message` で 1 行のメッセージとして出す。警告は Zellij のログにも出す。
+  - probe 一式を削除し、[osc7501-findings.md](osc7501-findings.md) の「再現方法」を直した。
+  - 不要になった hooks の例（`examples/claude-code/`）を削除した（D を参照）。
+  - `dev.kdl` に、スクリプトを実行するためのシェルペインを足した。
+- 実機（`dev.kdl`）で確認済み：permission の許可、色付きの表示、Claude Code から送られた状態の表示。
+- 未確認（実機で状況を起こして確かめる）
+  - `ModeUpdate` が届いているか：起動中に config.kdl の `theme` を別のテーマに変え、プラグインの色が tab-bar / status-bar と一緒に変わるか。
+  - Claude Code の状態ごとの表示
+    - working：時間のかかる指示（例：`sleep 10` を実行させる）を出している間。
+    - blocked / permission：許可されていないコマンドを実行させ、許可ダイアログが出ている間。拒否した後の表示も見る。
+    - blocked / question：選択肢を出して質問するよう頼み、質問が出ている間。
+    - done：応答が終わった後。Esc で中断した後の表示も見る。
+    - error：API エラーを起こす（例：ネットワークを切ってから指示を出す）。
+    - idle：起動直後。
+  - Claude Code を終了すると、約 2 秒で表示が消えるか。
+  - 複数のペインで Claude Code を動かしたときの並び順（タブ順 → ペイン id 順）と、端末の幅を狭めたときの切り詰め。
+  - 設定：`dev.kdl` の plugin ブロックに `icon_style "alphabet"` や `apps "claude"` を書き、反映されるか。`icon_style "foo"` で警告が出るか（エージェントがいないときに表示）。
 
 ### F.（任意）クリックで該当ペインにフォーカス
 

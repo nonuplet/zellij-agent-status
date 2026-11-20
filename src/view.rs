@@ -9,9 +9,6 @@
 //! 3. アイコン（と進捗）だけにする
 //! 4. それでも収まらなければ、行の末尾を切る
 
-// main.rs とつなぐ（doc/tasks.md の E）までは未使用のため
-#![allow(dead_code)]
-
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::{PaletteColor, Styling};
 
@@ -143,6 +140,19 @@ pub fn render_line(
     paint(&layout(agents, cols, options), cols, theme)
 }
 
+/// エージェント一覧の代わりに出す 1 行のメッセージ（permission の案内や設定の警告）を作る。
+/// 幅を超える分は切り詰め、末尾は背景色の空白で埋める。
+pub fn render_message(text: &str, cols: usize, theme: &Theme) -> String {
+    let spans = match clean(Some(text)) {
+        Some(text) => clamp(
+            vec![Span::new(PAD, Role::Plain), Span::new(text, Role::Msg)],
+            cols,
+        ),
+        None => vec![],
+    };
+    paint(&spans, cols, theme)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
     /// 余白や区切り
@@ -180,15 +190,15 @@ struct Item {
 
 impl Item {
     fn new(agent: &AgentStatus, icons: IconStyle) -> Self {
-        let name = clean(&agent.title)
-            .or_else(|| clean(&agent.app))
+        let name = clean(agent.title.as_deref())
+            .or_else(|| clean(agent.app.as_deref()))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         Item {
             state: agent.state,
             icon: icons.icon(agent.state),
             progress: agent.progress.map(|p| format!("{p}%")),
             name,
-            msg: clean(&agent.msg),
+            msg: clean(agent.msg.as_deref()),
         }
     }
 
@@ -218,9 +228,8 @@ impl Item {
 /// 外部から届いた文字列を 1 行の表示用にする。
 /// 制御文字（改行や ESC など）はそのまま出すと画面が崩れるので空白に置き換える。
 /// 空になったら None。
-fn clean(text: &Option<String>) -> Option<String> {
-    let text: String = text
-        .as_deref()?
+fn clean(text: Option<&str>) -> Option<String> {
+    let text: String = text?
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
@@ -610,6 +619,22 @@ mod tests {
         let visible = strip_ansi(&line);
         assert_eq!(visible.width(), 20);
         assert_eq!(visible.trim_end(), " ✗ claude");
+    }
+
+    #[test]
+    fn message_is_cleaned_truncated_and_filled() {
+        let theme = Theme::default();
+        let line = render_message("設定の\n警告です", 12, &theme);
+        let visible = strip_ansi(&line);
+        assert_eq!(visible.width(), 12);
+        assert_eq!(visible, " 設定の 警~ ");
+
+        assert_eq!(strip_ansi(&render_message("ok", 5, &theme)), " ok  ");
+        assert_eq!(strip_ansi(&render_message(" \n", 3, &theme)), "   ");
+        for cols in 0..30 {
+            let visible = strip_ansi(&render_message("permission を待っています", cols, &theme));
+            assert_eq!(visible.width(), cols, "cols={cols}");
+        }
     }
 
     #[test]

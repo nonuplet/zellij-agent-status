@@ -20,9 +20,6 @@
 //! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。
 
-// main.rs から使うまでは未使用のため
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use crate::view::{IconStyle, ViewOptions};

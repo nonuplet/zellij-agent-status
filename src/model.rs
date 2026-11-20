@@ -4,9 +4,6 @@
 //! 元データは `PaneInfo.program_status` のルートレコード（`id` が None のもの）。
 //! 決めた経緯は doc/osc7501-findings.md を参照。
 
-// 収集と表示の実装が揃うまでは未使用のため
-#![allow(dead_code)]
-
 use zellij_tile::prelude::BlockedKind;
 use zellij_utils::attention::ProgramState;
 

@@ -6,9 +6,6 @@
 //!
 //! レコードは送信元のプログラムが終わると Zellij が消すので、古いレコードの掃除はしない。
 
-// main.rs への組み込み（doc/tasks.md の E）までは未使用のため
-#![allow(dead_code)]
-
 use crate::model::{AgentState, AgentStatus};
 use zellij_tile::prelude::*;
 use zellij_utils::attention::ProgramStatusRecord;

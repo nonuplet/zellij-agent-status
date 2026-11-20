@@ -11,6 +11,7 @@
 | `Theme::from_styling(&Styling)` | `ModeInfo.style.colors` から色を作る |
 | `Theme::default()` | `ModeUpdate` が届くまでの色 |
 | `ViewOptions { icons: IconStyle }` | 表示の設定。`IconStyle::Symbol`（既定）/ `IconStyle::Alphabet` |
+| `render_message(text, cols, &Theme) -> String` | エージェント一覧の代わりに出す 1 行のメッセージ（permission の案内や設定の警告）。制御文字の置き換えと切り詰めを行う |
 
 ## C（設定）向け
 
@@ -21,7 +22,6 @@
 
 - `ModeUpdate` を購読し、受け取るたびに `Theme::from_styling(&mode_info.style.colors)` で色を作り直す。
 - `render` では `print!("{}", render_line(...))` を呼ぶだけでよい。並べ替え・切り詰め・色付けは `render_line` の中で行う。
-- `src/view.rs` 先頭の `#![allow(dead_code)]` は、つないだら外す。
 
 ## 共通の注意
 
