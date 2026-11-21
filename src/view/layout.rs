@@ -8,8 +8,9 @@
 //! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
 //!
 //! 状態アイコンと進捗は、状態の色で背景を塗ったバッジ（`[↻ 42%] 名前`）にする。バッジの両端には
-//! 端の文字（[`BadgeEnds`]）を付ける。絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、
-//! バッジにせず端の文字も付けない。
+//! 端の文字（[`BadgeEnds`]。Nerd Font モードでは [`ViewOptions::badge_shape`] の形）を付ける。
+//! Nerd Font モードでは、左端とアイコンの間に塗った空白を 1 つ置く（[`BadgeEnds::inner_pad`]）。
+//! 絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、バッジにせず端の文字も付けない。
 //! [`ViewOptions::highlight_attention`] が true なら、`Blocked` / `Error` のエージェントは 1 つ分全体を
 //! バッジにする（`[! 名前: msg]`）。端の文字をエージェントの両端に移すだけなので、強調しても幅は変わらない。
 //!
@@ -34,6 +35,8 @@ use crate::model::{AgentState, AgentStatus};
 
 /// 行頭の余白
 pub(super) const PAD: &str = " ";
+/// エージェント同士の区切り。Nerd Font モードでも同じ（エージェントの境目はバッジで見分けられるため）
+const SEPARATOR: &str = "  ";
 /// 切り詰めたことを示す記号。
 /// `…`（U+2026）は East Asian Width が Ambiguous で、端末によっては 2 桁になるため使わない。
 const ELLIPSIS: char = '~';
@@ -46,17 +49,17 @@ const MSG_OVERHEAD: usize = 2;
 /// 名前の後ろに付ける cwd を囲む ` (` と `)` の幅
 const CWD_OVERHEAD: usize = 3;
 /// [`ViewOptions::max_length`] の下限。
-/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2）、進捗（最大 ` 255%` の 5）に、
-/// 名前の前の空白、[`MIN_NAME_WIDTH`]、名前の後ろの `app` のアイコンと前の空白（Nerd Font モードで 2）、
-/// アイコンの後ろの空白（[`ViewOptions::nerd_font_icon_padding`] で 1）を足した幅。
-/// 最も広いのは絵文字以外のアイコン（1 + 2）で、アイコンの後ろに空白を置くとき。
+/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。Nerd Font モードでは左端の後ろの空白を足して 3）、
+/// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の後ろの `app` のアイコンと前の空白
+/// （Nerd Font モードで 2）、アイコンの後ろの空白（[`ViewOptions::nerd_font_icon_padding`] で 1）を足した幅。
+/// 最も広いのは Nerd Font モードで絵文字以外のアイコン（1 + 3）を選び、アイコンの後ろに空白を置くとき。
 /// 設定ごとに下限を変えると config の読み込みが設定の順番に依存するので、最も広い場合に合わせている。
 /// Nerd Font の状態アイコンの後ろの空白は、進捗がないときだけ付けるので、進捗の最大幅を超えない。
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
-/// - アイコンと進捗だけで上限を超えることがある（例：バッジ + ` 100%` で 8）
+/// - アイコンと進捗だけで上限を超えることがある（例：Nerd Font モードのバッジ + ` 100%` で 9）
 /// - 上限に収めるために、名前が [`MIN_NAME_WIDTH`] より短く切り詰められて見分けられなくなる
-pub const MIN_MAX_LENGTH: usize = 16;
+pub const MIN_MAX_LENGTH: usize = 17;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Role {
@@ -105,28 +108,60 @@ impl Span {
     }
 }
 
+/// Nerd Font モードのバッジの端の形。
+///
+/// 端の文字は前景色を状態の色にして行の背景の上に描き、状態の色の背景（バッジの内側）と行の背景の境目にする。
+/// そのため Powerline の塗りつぶしの文字がそのまま使える。どの文字も 1 桁として扱う（`unicode-width` の `width()` と同じ）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BadgeShape {
+    /// `nf-ple-lower_right_triangle`（U+E0BA）/ `nf-ple-upper_left_triangle`（U+E0BC）
+    #[default]
+    Slash,
+    /// `nf-pl-right_hard_divider`（U+E0B2）/ `nf-pl-left_hard_divider`（U+E0B0）
+    Arrow,
+    /// `nf-ple-left_half_circle_thick`（U+E0B6）/ `nf-ple-right_half_circle_thick`（U+E0B4）
+    Round,
+}
+
+impl BadgeShape {
+    /// (左端, 右端) の文字
+    fn glyphs(self) -> (&'static str, &'static str) {
+        match self {
+            BadgeShape::Slash => ("\u{e0ba}", "\u{e0bc}"),
+            BadgeShape::Arrow => ("\u{e0b2}", "\u{e0b0}"),
+            BadgeShape::Round => ("\u{e0b6}", "\u{e0b4}"),
+        }
+    }
+}
+
 /// バッジの両端に付ける文字。どちらも左右 1 桁ずつ。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BadgeEnds {
     /// 空白を状態の色で塗る
     Space,
-    /// Nerd Font モードの半円（`nf-ple-left_half_circle_thick` U+E0B6 / `nf-ple-right_half_circle_thick` U+E0B4）。
+    /// Nerd Font モードの端の文字（[`ViewOptions::badge_shape`]）。
     /// 前景色を状態の色にして、行の背景の上に描く。
-    HalfCircle,
+    Glyph(BadgeShape),
 }
 
-const LEFT_HALF_CIRCLE: &str = "\u{e0b6}";
-const RIGHT_HALF_CIRCLE: &str = "\u{e0b4}";
-
 impl BadgeEnds {
-    /// 両端の幅の合計
-    const WIDTH: usize = 2;
+    /// 両端の文字と、左端の後ろの空白（[`BadgeEnds::inner_pad`]）の幅の合計
+    fn width(self) -> usize {
+        2 + usize::from(self.inner_pad())
+    }
+
+    /// 左端とアイコンの間に、塗った空白を置くか。
+    /// Nerd Font の端の文字は前景色で描くのでアイコンとの間に余白がなく、詰まって見えるため置く。
+    /// 空白の端はそれ自体が余白なので置かない（置くと左右の余白の釣り合いが悪くなる）。
+    fn inner_pad(self) -> bool {
+        matches!(self, BadgeEnds::Glyph(_))
+    }
 
     /// 絵文字アイコンはバッジにしないので None
     fn new(options: &ViewOptions) -> Option<Self> {
         match (options.icons, options.nerd_font) {
             (IconStyle::Emoji, _) => None,
-            (_, true) => Some(BadgeEnds::HalfCircle),
+            (_, true) => Some(BadgeEnds::Glyph(options.badge_shape)),
             (_, false) => Some(BadgeEnds::Space),
         }
     }
@@ -139,10 +174,10 @@ impl BadgeEnds {
                 let space = Span::new(" ", role).with_fill(Fill::State(state));
                 (space.clone(), space)
             }
-            BadgeEnds::HalfCircle => (
-                Span::new(LEFT_HALF_CIRCLE, role),
-                Span::new(RIGHT_HALF_CIRCLE, role),
-            ),
+            BadgeEnds::Glyph(shape) => {
+                let (left, right) = shape.glyphs();
+                (Span::new(left, role), Span::new(right, role))
+            }
         }
     }
 }
@@ -213,13 +248,13 @@ impl Item {
         }
     }
 
-    /// アイコンと進捗、バッジの両端の幅（常に表示する部分）。
+    /// アイコンと進捗、バッジの両端と左端の後ろの空白の幅（常に表示する部分）。
     /// 強調したときはバッジの右端がエージェントの末尾に移るが、幅は同じなのでここに含める。
     fn head_width(&self) -> usize {
         self.icon.width()
             + self.progress.as_ref().map_or(0, |p| 1 + p.width())
             + usize::from(self.icon_pad())
-            + self.ends.map_or(0, |_| BadgeEnds::WIDTH)
+            + self.ends.map_or(0, BadgeEnds::width)
     }
 
     /// 状態アイコンの後ろに空白を付けるか（Nerd Font のアイコンで、[`Item::icon_padding`] が true のとき）。
@@ -285,8 +320,8 @@ impl Item {
 
     /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
     ///
-    /// バッジは `左端 アイコン 進捗 右端`。強調するときは右端をエージェントの末尾に移し、全体を塗る。
-    /// 絵文字アイコン（端の文字なし）でも、強調するときは全体を塗る。
+    /// バッジは `左端 空白 アイコン 進捗 右端`。強調するときは右端をエージェントの末尾に移し、全体を塗る。
+    /// 絵文字アイコン（端の文字なし）は左端の後ろの空白も付けないが、強調するときは全体を塗る。
     fn spans(&self, widths: Widths) -> Vec<Span> {
         let state = Fill::State(self.state);
         let badge = if self.ends.is_some() || self.highlight {
@@ -297,6 +332,9 @@ impl Item {
         let (left, right) = self.ends.map(|e| e.spans(self.state)).unzip();
 
         let mut spans: Vec<Span> = left.into_iter().collect();
+        if self.ends.is_some_and(BadgeEnds::inner_pad) {
+            spans.push(Span::new(" ", Role::State(self.state)).with_fill(badge));
+        }
         spans.push(Span::new(self.icon, Role::State(self.state)).with_fill(badge));
         if let Some(progress) = &self.progress {
             spans.push(Span::new(format!(" {progress}"), Role::State(self.state)).with_fill(badge));
@@ -386,12 +424,11 @@ pub(super) fn layout<'a>(
         return vec![];
     }
 
-    let sep = options.separator_text();
     let mut spans = vec![Span::new(PAD, Role::Plain)];
-    let plans = plan(&items, cols, sep.width(), options.max_length);
+    let plans = plan(&items, cols, SEPARATOR.width(), options.max_length);
     for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {
-            spans.push(Span::new(sep, Role::Plain));
+            spans.push(Span::new(SEPARATOR, Role::Plain));
         }
         spans.extend(item.spans(widths));
     }
@@ -549,7 +586,6 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::Separator;
     use crate::view::icon::tests::assert_nerd_font_glyph;
     use crate::view::tests::{agent, with_cwd, with_msg};
 
@@ -976,7 +1012,7 @@ mod tests {
         }
     }
 
-    /// アイコン・cwd・Nerd Font モード（区切り）・強調・アイコンの後ろの空白の組み合わせ。
+    /// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白の組み合わせ。
     /// アイコンの後ろの空白が効かない組み合わせでは、同じ設定が 2 回入る（重複は気にしない）
     fn option_combinations() -> Vec<ViewOptions> {
         let styles = [
@@ -986,15 +1022,15 @@ mod tests {
             IconStyle::Nerd,
         ];
         let modes = [
-            (false, Separator::Arrow),
-            (true, Separator::Arrow),
-            (true, Separator::Round),
-            (true, Separator::Slash),
+            (false, BadgeShape::Slash),
+            (true, BadgeShape::Slash),
+            (true, BadgeShape::Arrow),
+            (true, BadgeShape::Round),
         ];
         let mut combinations = vec![];
         for style in styles {
             for show_cwd in [false, true] {
-                for (nerd_font, separator) in modes {
+                for (nerd_font, badge_shape) in modes {
                     for highlight_attention in [false, true] {
                         // アイコンの後ろの空白は Nerd Font のアイコンがあるときだけ効く
                         let uses_nerd_icon = nerd_font || style == IconStyle::Nerd;
@@ -1002,7 +1038,7 @@ mod tests {
                             combinations.push(ViewOptions {
                                 show_cwd,
                                 nerd_font,
-                                separator,
+                                badge_shape,
                                 highlight_attention,
                                 nerd_font_icon_padding,
                                 ..icons(style)
@@ -1026,7 +1062,7 @@ mod tests {
     fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<usize> {
         let mut widths = vec![0];
         for span in layout(agents, cols, options).into_iter().skip(1) {
-            if span.role == Role::Plain && span.text == options.separator_text() {
+            if span.role == Role::Plain && span.text == SEPARATOR {
                 widths.push(0);
             } else {
                 *widths.last_mut().unwrap() += span.text.width();
@@ -1066,15 +1102,15 @@ mod tests {
         a.progress = Some(100);
         assert_eq!(
             plain_with(&[a.clone()], 80, &max_length(MIN_MAX_LENGTH)),
-            " [↻ 100%] my-pro~"
+            " [↻ 100%] my-proj~"
         );
         let emoji = ViewOptions {
             icons: IconStyle::Emoji,
             ..max_length(MIN_MAX_LENGTH)
         };
         // 絵文字はバッジの端がない分、名前に回せる幅が広い
-        assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-proj~");
-        // Nerd Font モードでは名前の後ろの app のアイコンと前の空白の 2 も数える
+        assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-proje~");
+        // Nerd Font モードでは、バッジの左端の後ろの空白の 1 と、名前の後ろの app のアイコンと前の空白の 2 も数える
         a.app = Some("claude-code".to_owned());
         let nerd = ViewOptions {
             nerd_font: true,
@@ -1083,7 +1119,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a.clone()], 80, &nerd),
-            " [\u{f013} 100%] my-p~ \u{ec82}"
+            " [ \u{f013} 100%] my-p~ \u{ec82}"
         );
         // アイコンの後ろの空白も数える（名前は MIN_NAME_WIDTH まで縮む）
         let padded = ViewOptions {
@@ -1092,7 +1128,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a], 80, &padded),
-            " [\u{f013} 100%] my-~ \u{ec82} "
+            " [ \u{f013} 100%] my-~ \u{ec82} "
         );
     }
 
@@ -1240,47 +1276,43 @@ mod tests {
         }
     }
 
-    fn nerd_font(separator: Separator) -> ViewOptions {
+    fn nerd_font(badge_shape: BadgeShape) -> ViewOptions {
         ViewOptions {
             nerd_font: true,
-            separator,
+            badge_shape,
             ..icons(IconStyle::Nerd)
         }
     }
 
     #[test]
-    fn nerd_font_shows_app_icon_and_separator() {
+    fn nerd_font_shows_app_icon() {
         let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
         a.app = Some("claude-code".to_owned());
         let mut b = agent(2, AgentState::Done);
         b.app = Some("codex".to_owned());
         let agents = [a, b];
-        // app のアイコンは名前の後ろ。対応するアイコンのない app（codex）には付けない
-        assert_eq!(
-            plain_with(&agents, 80, &nerd_font(Separator::Arrow)),
-            " [\u{f013}] claude-code \u{ec82}: Running tests \u{e0b1} [\u{f00c}] codex"
-        );
-        assert_eq!(
-            plain_with(&agents, 80, &nerd_font(Separator::Round)),
-            " [\u{f013}] claude-code \u{ec82}: Running tests \u{e0b5} [\u{f00c}] codex"
-        );
-        assert_eq!(
-            plain_with(&agents, 80, &nerd_font(Separator::Slash)),
-            " [\u{f013}] claude-code \u{ec82}: Running tests \u{e0bb} [\u{f00c}] codex"
-        );
+        // app のアイコンは名前の後ろ。対応するアイコンのない app（codex）には付けない。
+        // エージェント同士の区切りは Nerd Font モードでも空白
+        for shape in SHAPES {
+            assert_eq!(
+                plain_with(&agents, 80, &nerd_font(shape)),
+                " [ \u{f013}] claude-code \u{ec82}: Running tests  [ \u{f00c}] codex",
+                "{shape:?}"
+            );
+        }
         // cwd は app のアイコンの後ろ
         let with_dir = [with_cwd(agents[0].clone(), "/repo/main")];
         let options = ViewOptions {
             show_cwd: true,
-            ..nerd_font(Separator::Arrow)
+            ..nerd_font(BadgeShape::Slash)
         };
         assert_eq!(
             plain_with(&with_dir, 80, &options),
-            " [\u{f013}] claude-code \u{ec82} (main): Running tests"
+            " [ \u{f013}] claude-code \u{ec82} (main): Running tests"
         );
-        // Nerd Font モードでなければ、app のアイコンも区切り文字も使わない
+        // Nerd Font モードでなければ、app のアイコンを付けない
         let symbol_only = ViewOptions {
-            separator: Separator::Slash,
+            badge_shape: BadgeShape::Arrow,
             ..Default::default()
         };
         assert_eq!(
@@ -1295,9 +1327,9 @@ mod tests {
         a.app = Some("claude-code".to_owned());
         let options = ViewOptions {
             show_app: false,
-            ..nerd_font(Separator::Arrow)
+            ..nerd_font(BadgeShape::Slash)
         };
-        assert_eq!(plain_with(&[a], 80, &options), " [\u{f186}] #7 \u{ec82}");
+        assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186}] #7 \u{ec82}");
     }
 
     #[test]
@@ -1306,7 +1338,7 @@ mod tests {
         a.app = Some("claude-code".to_owned());
         let options = ViewOptions {
             icons: IconStyle::Emoji,
-            ..nerd_font(Separator::Arrow)
+            ..nerd_font(BadgeShape::Slash)
         };
         assert_eq!(plain_with(&[a], 80, &options), " ✅ claude-code \u{ec82}");
     }
@@ -1320,29 +1352,29 @@ mod tests {
         let agents = [a, b];
         let options = ViewOptions {
             max_length: None,
-            ..nerd_font(Separator::Arrow)
+            ..nerd_font(BadgeShape::Slash)
         };
-        // 固定部分：" " (1) + "[\u{f013}]" (3) + " \u{e0b1} " (3) + "[\u{f00c}]" (3) = 10
+        // 固定部分：" " (1) + "[ \u{f013}]" (4) + "  " (2) + "[ \u{f00c}]" (4) = 11
         // 名前に付く部分：" " + " \u{ec82}" (3) と " " (1) = 4
-        // 名前に回せる幅は 26 - 10 - 4 = 12：短い "claude" に 6、残り 6 を長い方へ
+        // 名前に回せる幅は 27 - 11 - 4 = 12：短い "claude" に 6、残り 6 を長い方へ
         assert_eq!(
-            plain_with(&agents, 26, &options),
-            " [\u{f013}] long-~ \u{ec82} \u{e0b1} [\u{f00c}] claude"
+            plain_with(&agents, 27, &options),
+            " [ \u{f013}] long-~ \u{ec82}  [ \u{f00c}] claude"
         );
         // アイコンの後ろに空白を置くと、その分も数える
-        // 固定部分は 12（状態アイコンの後ろの空白 2）、名前に付く部分は 5（app のアイコンの後ろの空白 1）
+        // 固定部分は 13（状態アイコンの後ろの空白 2）、名前に付く部分は 5（app のアイコンの後ろの空白 1）
         let padded = ViewOptions {
             nerd_font_icon_padding: true,
             ..options.clone()
         };
         assert_eq!(
-            plain_with(&agents, 29, &padded),
-            " [\u{f013} ] long-~ \u{ec82}  \u{e0b1} [\u{f00c} ] claude"
+            plain_with(&agents, 30, &padded),
+            " [ \u{f013} ] long-~ \u{ec82}   [ \u{f00c} ] claude"
         );
         // 状態アイコンだけにする。app のアイコンも名前と一緒に省く
         assert_eq!(
-            plain_with(&agents, 17, &options),
-            " [\u{f013}] \u{e0b1} [\u{f00c}]"
+            plain_with(&agents, 18, &options),
+            " [ \u{f013}]  [ \u{f00c}]"
         );
     }
 
@@ -1357,12 +1389,12 @@ mod tests {
         let padded = ViewOptions {
             show_cwd: true,
             nerd_font_icon_padding: true,
-            ..nerd_font(Separator::Arrow)
+            ..nerd_font(BadgeShape::Slash)
         };
         // 進捗があれば、その前の空白が状態アイコンの右隣になるので足さない
         assert_eq!(
             plain_with(&agents, 80, &padded),
-            " [\u{f071} ] claude-code \u{ec82} : Allow? \u{e0b1} [\u{f00c} 42%] claude-code \u{ec82}  (main)"
+            " [ \u{f071} ] claude-code \u{ec82} : Allow?  [ \u{f00c} 42%] claude-code \u{ec82}  (main)"
         );
         // 強調しても幅は変わらない（状態アイコンと名前の間は空白 2 つ）
         let highlighted = ViewOptions {
@@ -1371,7 +1403,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&agents, 80, &highlighted),
-            " [\u{f071}  claude-code \u{ec82} : Allow?] \u{e0b1} [\u{f00c} 42%] claude-code \u{ec82}  (main)"
+            " [ \u{f071}  claude-code \u{ec82} : Allow?]  [ \u{f00c} 42%] claude-code \u{ec82}  (main)"
         );
         // Nerd Font のアイコンを使わなければ何も変わらない
         let symbol = ViewOptions {
@@ -1448,20 +1480,55 @@ mod tests {
             .collect()
     }
 
+    const SHAPES: [BadgeShape; 3] = [BadgeShape::Slash, BadgeShape::Arrow, BadgeShape::Round];
+
+    #[test]
+    fn badge_shape_glyphs() {
+        let cases = [
+            (BadgeShape::Slash, ["\u{e0ba}", "\u{e0bc}"]),
+            (BadgeShape::Arrow, ["\u{e0b2}", "\u{e0b0}"]),
+            (BadgeShape::Round, ["\u{e0b6}", "\u{e0b4}"]),
+        ];
+        for (shape, expected) in cases {
+            let (left, right) = shape.glyphs();
+            assert_eq!([left, right], expected, "{shape:?}");
+            assert_nerd_font_glyph(left);
+            assert_nerd_font_glyph(right);
+        }
+        assert_eq!(BadgeShape::default(), BadgeShape::Slash);
+    }
+
     #[test]
     fn badge_ends_depend_on_nerd_font_mode() {
         let a = [agent(1, AgentState::Working)];
         assert_eq!(badge_ends(&a, &ViewOptions::default()), [" ", " "]);
+        for shape in SHAPES {
+            let (left, right) = shape.glyphs();
+            assert_eq!(
+                badge_ends(&a, &nerd_font(shape)),
+                [left, right],
+                "{shape:?}"
+            );
+            // Nerd Font モードでなければ、形を指定しても空白
+            let plain_mode = ViewOptions {
+                badge_shape: shape,
+                ..icons(IconStyle::Nerd)
+            };
+            assert_eq!(badge_ends(&a, &plain_mode), [" ", " "], "{shape:?}");
+        }
+        // 既定の形は slash
         assert_eq!(
-            badge_ends(&a, &nerd_font(Separator::Arrow)),
-            [LEFT_HALF_CIRCLE, RIGHT_HALF_CIRCLE]
+            badge_ends(
+                &a,
+                &ViewOptions {
+                    nerd_font: true,
+                    ..icons(IconStyle::Nerd)
+                }
+            ),
+            ["\u{e0ba}", "\u{e0bc}"]
         );
-        // Nerd Font モードでなければ、状態アイコンが Nerd Font でも空白
-        assert_eq!(badge_ends(&a, &icons(IconStyle::Nerd)), [" ", " "]);
         // 絵文字はバッジにしない
         assert!(badge_ends(&a, &icons(IconStyle::Emoji)).is_empty());
-        assert_nerd_font_glyph(LEFT_HALF_CIRCLE);
-        assert_nerd_font_glyph(RIGHT_HALF_CIRCLE);
     }
 
     #[test]
@@ -1470,11 +1537,14 @@ mod tests {
         a.progress = Some(42);
         let a = [a];
         assert_eq!(filled_runs(&a, 80, &ViewOptions::default()), [" ↻ 42% "]);
-        // 半円は塗らずに前景色で描くので、塗るのはその内側だけ
-        assert_eq!(
-            filled_runs(&a, 80, &nerd_font(Separator::Arrow)),
-            ["\u{f013} 42%"]
-        );
+        // Nerd Font モードの端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
+        for shape in SHAPES {
+            assert_eq!(
+                filled_runs(&a, 80, &nerd_font(shape)),
+                [" \u{f013} 42%"],
+                "{shape:?}"
+            );
+        }
         assert!(filled_runs(&a, 80, &icons(IconStyle::Emoji)).is_empty());
     }
 
@@ -1511,23 +1581,28 @@ mod tests {
     }
 
     #[test]
-    fn highlight_attention_with_nerd_font_moves_half_circle_to_agent_end() {
+    fn highlight_attention_with_nerd_font_moves_badge_ends_to_agent_end() {
         let mut a = with_msg(agent(1, AgentState::Blocked), "Allow?");
         a.app = Some("claude-code".to_owned());
         let a = [a];
-        let options = highlight(nerd_font(Separator::Arrow));
-        let raw: String = layout(&a, 80, &options)
-            .into_iter()
-            .map(|s| s.text)
-            .collect();
-        assert_eq!(
-            raw,
-            " \u{e0b6}\u{f071} claude-code \u{ec82}: Allow?\u{e0b4}"
-        );
-        assert_eq!(
-            filled_runs(&a, 80, &options),
-            ["\u{f071} claude-code \u{ec82}: Allow?"]
-        );
+        for shape in SHAPES {
+            let options = highlight(nerd_font(shape));
+            let raw: String = layout(&a, 80, &options)
+                .into_iter()
+                .map(|s| s.text)
+                .collect();
+            let (left, right) = shape.glyphs();
+            assert_eq!(
+                raw,
+                format!(" {left} \u{f071} claude-code \u{ec82}: Allow?{right}"),
+                "{shape:?}"
+            );
+            assert_eq!(
+                filled_runs(&a, 80, &options),
+                [" \u{f071} claude-code \u{ec82}: Allow?"],
+                "{shape:?}"
+            );
+        }
     }
 
     #[test]

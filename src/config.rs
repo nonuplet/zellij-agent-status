@@ -12,7 +12,7 @@
 //!     max_length 40
 //!     show_cwd "true"
 //!     nerd_font "true"
-//!     separator "round"
+//!     badge_shape "round"
 //!     nerd_font_icon_padding "true"
 //!     highlight_attention "true"
 //! }
@@ -26,8 +26,8 @@
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //! | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
-//! | `nerd_font` | `false` | Nerd Font モード。区切りを `separator` の文字にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
-//! | `separator` | `arrow` | Nerd Font モードの区切り文字（`arrow` / `round` / `slash`）。`nerd_font` が false なら使わない |
+//! | `nerd_font` | `false` | Nerd Font モード。バッジの端を `badge_shape` の形にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
+//! | `badge_shape` | `slash` | Nerd Font モードのバッジの端の形（`slash` / `arrow` / `round`）。`nerd_font` が false なら使わない |
 //! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け |
 //! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
 //!
@@ -44,7 +44,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::view::{DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, Separator, ViewOptions};
+use crate::view::{BadgeShape, DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, ViewOptions};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -79,11 +79,11 @@ impl Config {
             }
         }
 
-        if let Some(value) = configuration.get("separator") {
-            match parse_separator(value) {
-                Some(separator) => config.view.separator = separator,
+        if let Some(value) = configuration.get("badge_shape") {
+            match parse_badge_shape(value) {
+                Some(shape) => config.view.badge_shape = shape,
                 None => warnings.push(format!(
-                    "separator: `{value}` は使えません。`arrow`・`round`・`slash` のどれかを指定してください（既定値を使います）"
+                    "badge_shape: `{value}` は使えません。`slash`・`arrow`・`round` のどれかを指定してください（既定値を使います）"
                 )),
             }
         }
@@ -178,11 +178,11 @@ fn parse_icon_style(value: &str) -> Option<IconStyle> {
     }
 }
 
-fn parse_separator(value: &str) -> Option<Separator> {
+fn parse_badge_shape(value: &str) -> Option<BadgeShape> {
     match value {
-        "arrow" => Some(Separator::Arrow),
-        "round" => Some(Separator::Round),
-        "slash" => Some(Separator::Slash),
+        "slash" => Some(BadgeShape::Slash),
+        "arrow" => Some(BadgeShape::Arrow),
+        "round" => Some(BadgeShape::Round),
         _ => None,
     }
 }
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
         assert!(!config.view.show_cwd);
         assert!(!config.view.nerd_font);
-        assert_eq!(config.view.separator, Separator::Arrow);
+        assert_eq!(config.view.badge_shape, BadgeShape::Slash);
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
     }
@@ -285,34 +285,34 @@ mod tests {
     }
 
     #[test]
-    fn separator() {
+    fn badge_shape() {
         let cases = [
-            ("arrow", Separator::Arrow),
-            ("round", Separator::Round),
-            ("slash", Separator::Slash),
+            ("slash", BadgeShape::Slash),
+            ("arrow", BadgeShape::Arrow),
+            ("round", BadgeShape::Round),
         ];
         for (value, expected) in cases {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("nerd_font", "true"),
-                ("separator", value),
+                ("badge_shape", value),
             ]));
             assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.separator, expected, "{value}");
+            assert_eq!(config.view.badge_shape, expected, "{value}");
         }
     }
 
     #[test]
-    fn invalid_separator_falls_back_to_default_with_warning() {
+    fn invalid_badge_shape_falls_back_to_default_with_warning() {
         for value in ["Arrow", "space", ">", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("separator", value),
+                ("badge_shape", value),
                 ("nerd_font", "true"),
             ]));
-            assert_eq!(config.view.separator, Separator::Arrow, "{value}");
+            assert_eq!(config.view.badge_shape, BadgeShape::Slash, "{value}");
             // 他のキーは影響を受けない
             assert!(config.view.nerd_font, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("separator:"), "{value}");
+            assert!(warnings[0].starts_with("badge_shape:"), "{value}");
         }
     }
 
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn max_length() {
-        let cases = [("40", Some(40)), ("16", Some(MIN_MAX_LENGTH)), ("0", None)];
+        let cases = [("40", Some(40)), ("17", Some(MIN_MAX_LENGTH)), ("0", None)];
         for (value, expected) in cases {
             let (config, warnings) =
                 Config::from_configuration(&configuration(&[("max_length", value)]));
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn invalid_max_length_falls_back_to_default_with_warning() {
-        for value in ["abc", "1", "15", "-1", "40.5", " 40", ""] {
+        for value in ["abc", "1", "16", "-1", "40.5", " 40", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("max_length", value),
                 ("apps", "claude"),
