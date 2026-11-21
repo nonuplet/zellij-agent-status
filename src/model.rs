@@ -49,6 +49,15 @@ pub enum AgentState {
     Error,
 }
 
+impl AgentState {
+    /// 注意が必要な状態か（`Blocked` / `Error`）。
+    /// view の強調（`highlight_attention`）と msg の表示（`msg_mode`）が同じ判定を使い、
+    /// 強調するエージェントと msg を表示するエージェントがずれないようにする。
+    pub fn needs_attention(self) -> bool {
+        matches!(self, AgentState::Blocked | AgentState::Error)
+    }
+}
+
 impl From<ProgramState> for AgentState {
     fn from(state: ProgramState) -> Self {
         match state {
@@ -76,6 +85,21 @@ mod tests {
         ];
         for (input, expected) in cases {
             assert_eq!(AgentState::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn only_blocked_and_error_need_attention() {
+        use AgentState::*;
+        let cases = [
+            (Idle, false),
+            (Working, false),
+            (Blocked, true),
+            (Done, false),
+            (Error, true),
+        ];
+        for (state, expected) in cases {
+            assert_eq!(state.needs_attention(), expected, "{state:?}");
         }
     }
 }

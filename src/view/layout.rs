@@ -6,6 +6,8 @@
 //! [`ViewOptions::nerd_font_icon_padding`] が true なら、Nerd Font のアイコン（状態アイコンと `app` のアイコン）の
 //! 右隣に必ず空白を置く（`[<icon> ] <app>  名前: msg`。[`app_icon`] を参照）。
 //! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
+//! msg は [`ViewOptions::msg_mode`] で表示するエージェントにだけ持たせる。持たせないエージェントは
+//! msg がないのと同じに扱うので、空いた幅は cwd や名前に回る。
 //!
 //! 状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色で背景を塗ったバッジ（`[↻ 42% 名前 (cwd)] msg`）にする。
 //! バッジの右端が名前と msg の境目になるので、間は `: ` ではなく空白 1 つにする（[`Item::msg_separator`]）。
@@ -218,6 +220,7 @@ struct Item {
     app_icon: Option<&'static str>,
     /// カレントディレクトリの末尾のディレクトリ名（`show_cwd` が false なら None）
     cwd: Option<String>,
+    /// [`ViewOptions::msg_mode`] で表示しないエージェントでは None
     msg: Option<String>,
 }
 
@@ -249,8 +252,7 @@ impl Item {
         Item {
             state: agent.state,
             ends,
-            highlight: options.highlight_attention
-                && matches!(agent.state, AgentState::Blocked | AgentState::Error),
+            highlight: options.highlight_attention && agent.state.needs_attention(),
             badge_name: options.badge_name && ends.is_some(),
             icon: options.icons.icon(agent.state),
             nerd_icon: options.icons == IconStyle::Nerd,
@@ -263,7 +265,7 @@ impl Item {
                 .filter(|_| options.nerd_font)
                 .and_then(app_icon),
             cwd,
-            msg: clean(agent.msg.as_deref()),
+            msg: clean(agent.msg.as_deref()).filter(|_| options.msg_mode.shows(agent.state)),
         }
     }
 
@@ -629,12 +631,21 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::DEFAULT_MAX_LENGTH;
     use crate::view::icon::tests::assert_nerd_font_glyph;
     use crate::view::tests::{agent, with_cwd, with_msg};
+    use crate::view::{DEFAULT_MAX_LENGTH, MsgMode};
+
+    /// テストの基準にする設定。切り詰め方などを状態によらず確かめられるよう、msg はすべてのエージェントで表示する。
+    /// 既定値（[`MsgMode::Attention`]）での表示は `msg_mode_*` のテストで確かめる。
+    fn base() -> ViewOptions {
+        ViewOptions {
+            msg_mode: MsgMode::All,
+            ..Default::default()
+        }
+    }
 
     fn plain(agents: &[AgentStatus], cols: usize) -> String {
-        plain_with(agents, cols, &ViewOptions::default())
+        plain_with(agents, cols, &base())
     }
 
     /// 行の文字列。読みやすいように、バッジの端の文字は左端を `[`、右端を `]` にする
@@ -672,10 +683,7 @@ mod tests {
     }
 
     fn icons(icons: IconStyle) -> ViewOptions {
-        ViewOptions {
-            icons,
-            ..Default::default()
-        }
+        ViewOptions { icons, ..base() }
     }
 
     #[test]
@@ -752,7 +760,7 @@ mod tests {
     fn hidden_app_is_skipped_as_name() {
         let hide_app = ViewOptions {
             show_app: false,
-            ..Default::default()
+            ..base()
         };
         let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
         assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " [⋯ #7] waiting");
@@ -778,7 +786,7 @@ mod tests {
         assert_eq!(plain(&agents, 80), " [⋯ z]  [⋯ z]  [⋯ a]");
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
-            ..Default::default()
+            ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ z]  [⋯ a]");
     }
@@ -794,12 +802,12 @@ mod tests {
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
             show_app: false,
-            ..Default::default()
+            ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ #1]");
         let hide_app = ViewOptions {
             show_app: false,
-            ..Default::default()
+            ..base()
         };
         assert_eq!(
             plain_with(&agents, 80, &hide_app),
@@ -812,7 +820,7 @@ mod tests {
         ViewOptions {
             show_cwd: true,
             max_length: None,
-            ..Default::default()
+            ..base()
         }
     }
 
@@ -932,7 +940,7 @@ mod tests {
         use AgentState::*;
         let blocked_first = ViewOptions {
             blocked_first: true,
-            ..Default::default()
+            ..base()
         };
         let agents = named_agents([Idle, Blocked, Working, Blocked, Error]);
         assert_eq!(
@@ -957,7 +965,7 @@ mod tests {
         use AgentState::*;
         let blocked_first = ViewOptions {
             blocked_first: true,
-            ..Default::default()
+            ..base()
         };
         let agents = named_agents([Idle, Idle, Idle, Idle, Blocked]);
         assert_eq!(plain(&agents, 12), " [⋯]  [⋯]  ~");
@@ -974,7 +982,7 @@ mod tests {
 
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
-            ..Default::default()
+            ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ claude]");
         // 絞り込まなければ、app のないエージェントも表示する
@@ -1059,8 +1067,10 @@ mod tests {
         }
     }
 
-    /// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白・バッジの中の名前の組み合わせ。
-    /// アイコンの後ろの空白が効かない組み合わせでは、同じ設定が 2 回入る（重複は気にしない）
+    /// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白・バッジの中の名前・
+    /// msg の表示モードの組み合わせ。
+    /// アイコンの後ろの空白が効かない組み合わせでは、同じ設定が 2 回入る（重複は気にしない）。
+    /// msg の表示モードの `None` は、msg のないエージェントだけになるのと同じなので入れない
     fn option_combinations() -> Vec<ViewOptions> {
         let styles = [
             IconStyle::Symbol,
@@ -1083,15 +1093,18 @@ mod tests {
                         let uses_nerd_icon = nerd_font || style == IconStyle::Nerd;
                         for nerd_font_icon_padding in [false, uses_nerd_icon] {
                             for badge_name in [false, true] {
-                                combinations.push(ViewOptions {
-                                    show_cwd,
-                                    nerd_font,
-                                    badge_shape,
-                                    highlight_attention,
-                                    nerd_font_icon_padding,
-                                    badge_name,
-                                    ..icons(style)
-                                });
+                                for msg_mode in [MsgMode::All, MsgMode::Attention] {
+                                    combinations.push(ViewOptions {
+                                        show_cwd,
+                                        nerd_font,
+                                        badge_shape,
+                                        highlight_attention,
+                                        nerd_font_icon_padding,
+                                        badge_name,
+                                        msg_mode,
+                                        ..icons(style)
+                                    });
+                                }
                             }
                         }
                     }
@@ -1104,7 +1117,7 @@ mod tests {
     fn max_length(max_length: usize) -> ViewOptions {
         ViewOptions {
             max_length: Some(max_length),
-            ..Default::default()
+            ..base()
         }
     }
 
@@ -1206,7 +1219,7 @@ mod tests {
         );
         let unlimited = ViewOptions {
             max_length: None,
-            ..Default::default()
+            ..base()
         };
         assert_eq!(
             plain_with(&[a], 80, &unlimited),
@@ -1363,7 +1376,7 @@ mod tests {
         // Nerd Font モードでなければ、app のアイコンを付けない
         let symbol_only = ViewOptions {
             badge_shape: BadgeShape::Arrow,
-            ..Default::default()
+            ..base()
         };
         assert_eq!(
             plain_with(&agents, 80, &symbol_only),
@@ -1458,7 +1471,7 @@ mod tests {
         // Nerd Font のアイコンを使わなければ何も変わらない
         let symbol = ViewOptions {
             nerd_font_icon_padding: true,
-            ..Default::default()
+            ..base()
         };
         assert_eq!(plain_with(&agents, 80, &symbol), plain(&agents, 80));
     }
@@ -1551,7 +1564,7 @@ mod tests {
     #[test]
     fn badge_ends_depend_on_nerd_font_mode() {
         let a = [agent(1, AgentState::Working)];
-        assert_eq!(badge_ends(&a, &ViewOptions::default()), [" ", " "]);
+        assert_eq!(badge_ends(&a, &base()), [" ", " "]);
         for shape in SHAPES {
             let (left, right) = shape.glyphs();
             assert_eq!(
@@ -1586,7 +1599,7 @@ mod tests {
         let mut a = with_msg(agent(1, AgentState::Working), "Running");
         a.progress = Some(42);
         let a = [a];
-        let options = without_badge_name(ViewOptions::default());
+        let options = without_badge_name(base());
         assert_eq!(plain_with(&a, 80, &options), " [↻ 42%] claude: Running");
         assert_eq!(filled_runs(&a, 80, &options), [" ↻ 42% "]);
         // Nerd Font モードの端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
@@ -1617,7 +1630,7 @@ mod tests {
             }
         }
         // 強調の範囲が分かりやすいよう、名前はバッジに入れない（入れるときは badge_name_with_highlight_attention）
-        let base = without_badge_name(ViewOptions::default());
+        let base = without_badge_name(base());
         let options = highlight(base.clone());
         let line = plain_with(&agents, 80, &options);
         assert_eq!(line, " [⋯] a  [! b: Allow Bash?]  [↻] c  [✓] d  [✗ e]");
@@ -1692,11 +1705,11 @@ mod tests {
         // バッジの右端が名前と msg の境目になるので、msg の前は `: ` ではなく空白
         assert_eq!(line, " [↻ 42% claude] Running tests  [✓ codex]");
         assert_eq!(
-            filled_runs(&agents, 80, &ViewOptions::default()),
+            filled_runs(&agents, 80, &base()),
             [" ↻ 42% claude ", " ✓ codex "]
         );
         // badge_name が false なら、状態アイコンと進捗だけをバッジにし、msg の前は `: `
-        let without = without_badge_name(ViewOptions::default());
+        let without = without_badge_name(base());
         let line_without = plain_with(&agents, 80, &without);
         assert_eq!(line_without, " [↻ 42%] claude: Running tests  [✓] codex");
         // 違いは端の文字の位置と msg の前の区切りだけなので、区切りの差の 1 だけ狭い
@@ -1743,7 +1756,7 @@ mod tests {
         a.title = Some("long-project-name".to_owned());
         let b = agent(2, AgentState::Done);
         let agents = [a, b];
-        let options = ViewOptions::default();
+        let options = base();
         assert_eq!(
             plain_with(&agents, 24, &options),
             " [↻ long-p~]  [✓ claude]"
@@ -1855,7 +1868,7 @@ mod tests {
                 _ => {}
             }
         }
-        let options = highlight(ViewOptions::default());
+        let options = highlight(base());
         // 強調したエージェント（b, e）は全体を塗り、名前と msg の間に境目がないので `: ` にする。
         // それ以外は名前までをバッジにし、msg の前は空白
         assert_eq!(
@@ -1865,6 +1878,99 @@ mod tests {
         assert_eq!(
             filled_runs(&agents, 80, &options),
             [" ⋯ a ", " ! b: Allow Bash? ", " ↻ c ", " ✓ d ", " ✗ e "]
+        );
+    }
+
+    /// a〜d がそれぞれ Working / Blocked / Done / Error で、msg を持つ
+    fn agents_with_msgs() -> Vec<AgentStatus> {
+        use AgentState::*;
+        [
+            ("a", Working, "Running tests"),
+            ("b", Blocked, "Allow Bash?"),
+            ("c", Done, "Done"),
+            ("d", Error, "build failed"),
+        ]
+        .into_iter()
+        .zip(1..)
+        .map(|((name, state, msg), pane)| {
+            let mut a = with_msg(agent(pane, state), msg);
+            a.title = Some(name.to_owned());
+            a
+        })
+        .collect()
+    }
+
+    fn msg_mode(msg_mode: MsgMode) -> ViewOptions {
+        ViewOptions { msg_mode, ..base() }
+    }
+
+    #[test]
+    fn msg_mode_selects_agents_showing_msg() {
+        let agents = agents_with_msgs();
+        let attention = " [↻ a]  [! b] Allow Bash?  [✓ c]  [✗ d] build failed";
+        assert_eq!(
+            plain_with(&agents, 80, &msg_mode(MsgMode::Attention)),
+            attention
+        );
+        // 既定は attention
+        assert_eq!(plain_with(&agents, 80, &ViewOptions::default()), attention);
+        assert_eq!(
+            plain_with(&agents, 80, &msg_mode(MsgMode::All)),
+            " [↻ a] Running tests  [! b] Allow Bash?  [✓ c] Done  [✗ d] build failed"
+        );
+        assert_eq!(
+            plain_with(&agents, 80, &msg_mode(MsgMode::None)),
+            " [↻ a]  [! b]  [✓ c]  [✗ d]"
+        );
+    }
+
+    #[test]
+    fn hidden_msg_leaves_room_for_others() {
+        let a = with_msg(
+            with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
+            "Running tests",
+        );
+        let b = with_msg(
+            with_cwd(agent(2, AgentState::Blocked), "/repo/main"),
+            "Allow Bash?",
+        );
+        let agents = [a, b];
+        let options = |msg_mode| ViewOptions {
+            msg_mode,
+            ..show_cwd()
+        };
+        // all では 2 つの msg で幅を分け合い、どちらも MIN_MSG_WIDTH を下回るので msg を省く
+        assert_eq!(
+            plain_with(&agents, 59, &options(MsgMode::All)),
+            " [↻ claude (feature-branch)]  [! claude (main)]"
+        );
+        // attention では Working の msg の分が空き、cwd を縮めずに Blocked の msg を表示できる
+        assert_eq!(
+            plain_with(&agents, 59, &options(MsgMode::Attention)),
+            " [↻ claude (feature-branch)]  [! claude (main)] Allow Bash?"
+        );
+        assert_eq!(
+            plain_with(&agents, 54, &options(MsgMode::Attention)),
+            " [↻ claude (feature-branch)]  [! claude (main)] Allow~"
+        );
+    }
+
+    #[test]
+    fn msg_mode_attention_matches_highlighted_agents() {
+        let agents = agents_with_msgs();
+        let options = highlight(msg_mode(MsgMode::Attention));
+        assert_eq!(
+            plain_with(&agents, 80, &options),
+            " [↻ a]  [! b: Allow Bash?]  [✓ c]  [✗ d: build failed]"
+        );
+        assert_eq!(
+            filled_runs(&agents, 80, &options),
+            [
+                " ↻ a ",
+                " ! b: Allow Bash? ",
+                " ✓ c ",
+                " ✗ d: build failed "
+            ]
         );
     }
 

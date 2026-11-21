@@ -16,7 +16,7 @@ pub use icon::IconStyle;
 pub use layout::{BadgeShape, MIN_MAX_LENGTH};
 pub use theme::Theme;
 
-use crate::model::AgentStatus;
+use crate::model::{AgentState, AgentStatus};
 use layout::{PAD, Role, Span, clamp, clean, layout};
 use paint::paint;
 
@@ -49,6 +49,33 @@ pub struct ViewOptions {
     /// 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコン（バッジにしない）では使わない。
     /// アイコンがバッジの端で切れたり重なったりしないよう、既定で入れる（`src/view/layout.rs` を参照）
     pub badge_name: bool,
+    /// どのエージェントで msg を表示するか
+    pub msg_mode: MsgMode,
+}
+
+/// msg を表示するエージェントの範囲（[`ViewOptions::msg_mode`]）。
+/// 注意が必要な状態の判定は [`AgentState::needs_attention`] で、[`ViewOptions::highlight_attention`] と同じ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MsgMode {
+    /// どのエージェントでも表示しない
+    None,
+    /// 注意が必要な状態（`Blocked` / `Error`）のエージェントだけ表示する。
+    /// エージェントが多いと行が msg で埋まり、操作待ちの理由などが切り詰められたり埋もれたりするため、これを既定にしている
+    #[default]
+    Attention,
+    /// すべてのエージェントで表示する
+    All,
+}
+
+impl MsgMode {
+    /// 状態が `state` のエージェントで msg を表示するか
+    fn shows(self, state: AgentState) -> bool {
+        match self {
+            MsgMode::None => false,
+            MsgMode::Attention => state.needs_attention(),
+            MsgMode::All => true,
+        }
+    }
 }
 
 /// [`ViewOptions::max_length`] の既定値
@@ -69,6 +96,7 @@ impl Default for ViewOptions {
             nerd_font_icon_padding: false,
             highlight_attention: false,
             badge_name: true,
+            msg_mode: MsgMode::default(),
         }
     }
 }
@@ -118,7 +146,6 @@ pub fn render_message(text: &str, cols: usize, theme: &Theme) -> String {
 pub(crate) mod tests {
     use super::theme::Color;
     use super::*;
-    use crate::model::AgentState;
     use unicode_width::UnicodeWidthStr;
 
     pub(crate) fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
