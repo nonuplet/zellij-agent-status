@@ -5,23 +5,20 @@
 //!
 //! - [`layout`](mod@layout)：どのエージェントを、どの順で、どの文字列をどの役割で並べるか（幅に合わせた切り詰めを含む）
 //! - [`paint`](mod@paint)：色付け
-//! - [`theme`] / [`icon`] / [`separator`]：色・アイコン・区切り文字の定義
+//! - [`theme`] / [`icon`]：色・アイコンの定義
 
 mod icon;
 mod layout;
 mod paint;
-mod separator;
 mod theme;
 
 pub use icon::IconStyle;
-pub use layout::MIN_MAX_LENGTH;
-pub use separator::Separator;
+pub use layout::{BadgeShape, MIN_MAX_LENGTH};
 pub use theme::Theme;
 
 use crate::model::AgentStatus;
 use layout::{PAD, Role, Span, clamp, clean, layout};
 use paint::paint;
-use separator::PLAIN_SEPARATOR;
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,11 +36,11 @@ pub struct ViewOptions {
     pub max_length: Option<usize>,
     /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
-    /// Nerd Font モード。区切りを [`ViewOptions::separator`] の文字にし、名前の後ろに
+    /// Nerd Font モード。バッジの端を [`ViewOptions::badge_shape`] の形にし、名前の後ろに
     /// `app` のアイコンを付ける。状態アイコン（[`ViewOptions::icons`]）は config 側で切り替える。
     pub nerd_font: bool,
-    /// Nerd Font モードの区切り文字。`nerd_font` が false なら使わない
-    pub separator: Separator,
+    /// Nerd Font モードのバッジの端の形。`nerd_font` が false なら使わない
+    pub badge_shape: BadgeShape,
     /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
     /// グリフが 1 桁からはみ出すかどうかはフォントと端末の組み合わせで変わり、プログラムからは判別できないため設定にしている。
     pub nerd_font_icon_padding: bool,
@@ -65,7 +62,7 @@ impl Default for ViewOptions {
             max_length: Some(DEFAULT_MAX_LENGTH),
             show_cwd: false,
             nerd_font: false,
-            separator: Separator::default(),
+            badge_shape: BadgeShape::default(),
             nerd_font_icon_padding: false,
             highlight_attention: false,
         }
@@ -73,15 +70,6 @@ impl Default for ViewOptions {
 }
 
 impl ViewOptions {
-    /// エージェント同士の区切り
-    fn separator_text(&self) -> &'static str {
-        if self.nerd_font {
-            self.separator.text()
-        } else {
-            PLAIN_SEPARATOR
-        }
-    }
-
     /// このエージェントを表示するか。表示するエージェントの条件はここに集める
     /// （[`layout()`] と、一覧が空かどうかを見る `main.rs` の両方が使う）。
     pub fn shows(&self, agent: &AgentStatus) -> bool {
@@ -218,13 +206,13 @@ pub(crate) mod tests {
             line.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
             "{line:?}"
         );
-        // バッジの端の半円は、行の背景の上に状態の色の前景色で描き、太字にしない
+        // バッジの端の文字（既定の slash）は、行の背景の上に状態の色の前景色で描き、太字にしない
         assert!(
-            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0b6}"),
+            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0ba}"),
             "{line:?}"
         );
         assert!(
-            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0b4}"),
+            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0bc}"),
             "{line:?}"
         );
     }

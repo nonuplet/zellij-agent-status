@@ -65,7 +65,6 @@ impl IconStyle {
 /// 端末によってアイコンが小さく潰れて見分けられないことがある）。
 /// 右隣が空白でないと、はみ出した部分が切れたり隣の文字と重なったりする。プログラムからは判別できないので、
 /// `nerd_font_icon_padding` が true のときだけ、状態アイコン・`app` のアイコンの右隣に layout で空白を置く。
-/// 区切り文字（[`super::separator`]）は常に前後に空白を付けている。
 pub(super) fn app_icon(app: &str) -> Option<&'static str> {
     match app {
         "claude-code" => Some("\u{ec82}"),
