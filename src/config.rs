@@ -16,6 +16,7 @@
 //!     nerd_font_icon_padding "true"
 //!     highlight_attention "true"
 //!     badge_name "false"
+//!     msg_mode "all"
 //! }
 //! ```
 //!
@@ -32,6 +33,7 @@
 //! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け（`badge_name` が true なら、たいていは要らない） |
 //! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
 //! | `badge_name` | `true` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。`false` なら状態アイコンと進捗だけをバッジにする。`true` なら名前と msg の間の `: ` を空白にする（強調したエージェントを除く）。絵文字アイコンでは使わない |
+//! | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、`Blocked` / `Error` だけ（`attention`）、すべて（`all`）のどれか |
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -46,7 +48,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::view::{BadgeShape, DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, ViewOptions};
+use crate::view::{
+    BadgeShape, DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, MsgMode, ViewOptions,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -157,6 +161,15 @@ impl Config {
             }
         }
 
+        if let Some(value) = configuration.get("msg_mode") {
+            match parse_msg_mode(value) {
+                Some(msg_mode) => config.view.msg_mode = msg_mode,
+                None => warnings.push(format!(
+                    "msg_mode: `{value}` は使えません。`none`・`attention`・`all` のどれかを指定してください（既定値を使います）"
+                )),
+            }
+        }
+
         (config, warnings)
     }
 }
@@ -198,6 +211,15 @@ fn parse_badge_shape(value: &str) -> Option<BadgeShape> {
     }
 }
 
+fn parse_msg_mode(value: &str) -> Option<MsgMode> {
+    match value {
+        "none" => Some(MsgMode::None),
+        "attention" => Some(MsgMode::Attention),
+        "all" => Some(MsgMode::All),
+        _ => None,
+    }
+}
+
 /// カンマか空白で区切った一覧。空なら None（絞り込まない）。
 fn parse_apps(value: &str) -> Option<Vec<String>> {
     let apps: Vec<String> = value
@@ -234,6 +256,7 @@ mod tests {
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
         assert!(config.view.badge_name);
+        assert_eq!(config.view.msg_mode, MsgMode::Attention);
     }
 
     #[test]
@@ -483,6 +506,36 @@ mod tests {
             assert!(!config.view.show_app, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("badge_name:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn msg_mode() {
+        let cases = [
+            ("none", MsgMode::None),
+            ("attention", MsgMode::Attention),
+            ("all", MsgMode::All),
+        ];
+        for (value, expected) in cases {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("msg_mode", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.msg_mode, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_msg_mode_falls_back_to_default_with_warning() {
+        for value in ["All", "blocked", "true", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("msg_mode", value),
+                ("show_app", "false"),
+            ]));
+            assert_eq!(config.view.msg_mode, MsgMode::Attention, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("msg_mode:"), "{value}");
         }
     }
 
