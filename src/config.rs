@@ -11,17 +11,24 @@
 //!     blocked_first "true"
 //!     max_length 40
 //!     show_cwd "true"
+//!     nerd_font "true"
+//!     separator "round"
 //! }
 //! ```
 //!
 //! | キー | 既定値 | 内容 |
 //! |---|---|---|
-//! | `icon_style` | `symbol` | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）のどれにするか |
+//! | `icon_style` | `symbol`（`nerd_font` が true なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
 //! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //! | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
+//! | `nerd_font` | `false` | Nerd Font モード。区切りを `separator` の文字にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
+//! | `separator` | `arrow` | Nerd Font モードの区切り文字（`arrow` / `round` / `slash`）。`nerd_font` が false なら使わない |
+//!
+//! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
+//! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
 //! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
@@ -33,7 +40,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::view::{DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, ViewOptions};
+use crate::view::{DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, Separator, ViewOptions};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -46,11 +53,33 @@ impl Config {
         let mut config = Self::default();
         let mut warnings = Vec::new();
 
+        // icon_style の既定値が変わるので、icon_style より先に読む
+        if let Some(value) = configuration.get("nerd_font") {
+            match parse_bool(value) {
+                Some(nerd_font) => config.view.nerd_font = nerd_font,
+                None => warnings.push(format!(
+                    "nerd_font: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+        if config.view.nerd_font {
+            config.view.icons = IconStyle::Nerd;
+        }
+
         if let Some(value) = configuration.get("icon_style") {
             match parse_icon_style(value) {
                 Some(icons) => config.view.icons = icons,
                 None => warnings.push(format!(
-                    "icon_style: `{value}` は使えません。`symbol`・`alphabet`・`emoji` のどれかを指定してください（既定値を使います）"
+                    "icon_style: `{value}` は使えません。`symbol`・`alphabet`・`emoji`・`nerd` のどれかを指定してください（既定値を使います）"
+                )),
+            }
+        }
+
+        if let Some(value) = configuration.get("separator") {
+            match parse_separator(value) {
+                Some(separator) => config.view.separator = separator,
+                None => warnings.push(format!(
+                    "separator: `{value}` は使えません。`arrow`・`round`・`slash` のどれかを指定してください（既定値を使います）"
                 )),
             }
         }
@@ -122,6 +151,16 @@ fn parse_icon_style(value: &str) -> Option<IconStyle> {
         "symbol" => Some(IconStyle::Symbol),
         "alphabet" => Some(IconStyle::Alphabet),
         "emoji" => Some(IconStyle::Emoji),
+        "nerd" => Some(IconStyle::Nerd),
+        _ => None,
+    }
+}
+
+fn parse_separator(value: &str) -> Option<Separator> {
+    match value {
+        "arrow" => Some(Separator::Arrow),
+        "round" => Some(Separator::Round),
+        "slash" => Some(Separator::Slash),
         _ => None,
     }
 }
@@ -157,6 +196,100 @@ mod tests {
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
         assert!(!config.view.show_cwd);
+        assert!(!config.view.nerd_font);
+        assert_eq!(config.view.separator, Separator::Arrow);
+    }
+
+    #[test]
+    fn nerd_font_switches_default_icon_style() {
+        let (config, warnings) =
+            Config::from_configuration(&configuration(&[("nerd_font", "true")]));
+        assert!(warnings.is_empty());
+        assert!(config.view.nerd_font);
+        assert_eq!(config.view.icons, IconStyle::Nerd);
+
+        let (config, warnings) =
+            Config::from_configuration(&configuration(&[("nerd_font", "false")]));
+        assert!(warnings.is_empty());
+        assert!(!config.view.nerd_font);
+        assert_eq!(config.view.icons, IconStyle::Symbol);
+    }
+
+    #[test]
+    fn explicit_icon_style_wins_over_nerd_font() {
+        let (config, warnings) = Config::from_configuration(&configuration(&[
+            ("nerd_font", "true"),
+            ("icon_style", "emoji"),
+        ]));
+        assert!(warnings.is_empty());
+        assert!(config.view.nerd_font);
+        assert_eq!(config.view.icons, IconStyle::Emoji);
+
+        // nerd_font なしで状態アイコンだけ Nerd Font にもできる
+        let (config, warnings) =
+            Config::from_configuration(&configuration(&[("icon_style", "nerd")]));
+        assert!(warnings.is_empty());
+        assert!(!config.view.nerd_font);
+        assert_eq!(config.view.icons, IconStyle::Nerd);
+    }
+
+    #[test]
+    fn invalid_icon_style_falls_back_to_nerd_in_nerd_font_mode() {
+        let (config, warnings) = Config::from_configuration(&configuration(&[
+            ("nerd_font", "true"),
+            ("icon_style", "emoticon"),
+        ]));
+        assert_eq!(config.view.icons, IconStyle::Nerd);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].starts_with("icon_style:"));
+    }
+
+    #[test]
+    fn invalid_nerd_font_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("nerd_font", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.nerd_font, "{value}");
+            assert_eq!(config.view.icons, IconStyle::Symbol, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("nerd_font:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn separator() {
+        let cases = [
+            ("arrow", Separator::Arrow),
+            ("round", Separator::Round),
+            ("slash", Separator::Slash),
+        ];
+        for (value, expected) in cases {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("nerd_font", "true"),
+                ("separator", value),
+            ]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.separator, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_separator_falls_back_to_default_with_warning() {
+        for value in ["Arrow", "space", ">", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("separator", value),
+                ("nerd_font", "true"),
+            ]));
+            assert_eq!(config.view.separator, Separator::Arrow, "{value}");
+            // 他のキーは影響を受けない
+            assert!(config.view.nerd_font, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("separator:"), "{value}");
+        }
     }
 
     #[test]
@@ -196,7 +329,7 @@ mod tests {
 
     #[test]
     fn max_length() {
-        let cases = [("40", Some(40)), ("12", Some(MIN_MAX_LENGTH)), ("0", None)];
+        let cases = [("40", Some(40)), ("14", Some(MIN_MAX_LENGTH)), ("0", None)];
         for (value, expected) in cases {
             let (config, warnings) =
                 Config::from_configuration(&configuration(&[("max_length", value)]));
@@ -207,7 +340,7 @@ mod tests {
 
     #[test]
     fn invalid_max_length_falls_back_to_default_with_warning() {
-        for value in ["abc", "1", "11", "-1", "40.5", " 40", ""] {
+        for value in ["abc", "1", "13", "-1", "40.5", " 40", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("max_length", value),
                 ("apps", "claude"),
@@ -274,6 +407,7 @@ mod tests {
             ("symbol", IconStyle::Symbol),
             ("alphabet", IconStyle::Alphabet),
             ("emoji", IconStyle::Emoji),
+            ("nerd", IconStyle::Nerd),
         ];
         for (value, expected) in cases {
             let (config, warnings) =

@@ -1,6 +1,8 @@
 //! レイアウト：どのエージェントを、どの順で、どの文字列をどの役割で並べるかを決める。
 //!
 //! 1 エージェント分は `アイコン 進捗 名前 (cwd): msg` の形（進捗・cwd・msg はあるときだけ）。
+//! Nerd Font モードでは、名前の後ろに `app` のアイコンを付けて `名前 <app> (cwd)` の形にする（対応するアイコンがあるときだけ）。
+//! `app` のアイコンは名前と一体で扱い、名前を省くときは一緒に省く。
 //! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
 //!
 //! [`ViewOptions::max_length`] を指定しているときは、まず 1 エージェント分（アイコン・進捗を含む）を
@@ -11,7 +13,7 @@
 //! 1. msg を各エージェントで均等に切り詰める
 //! 2. msg を省き、cwd を均等に切り詰める
 //! 3. cwd を省き、名前を均等に切り詰める
-//! 4. アイコン（と進捗）だけにする
+//! 4. 状態アイコン（と進捗）だけにする
 //! 5. それでも収まらなければ、行の末尾を切る
 
 use std::path::Path;
@@ -19,12 +21,11 @@ use std::path::Path;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::ViewOptions;
+use super::icon::app_icon;
 use crate::model::{AgentState, AgentStatus};
 
 /// 行頭の余白
 pub(super) const PAD: &str = " ";
-/// エージェント同士の区切り
-const SEP: &str = "  ";
 /// 切り詰めたことを示す記号。
 /// `…`（U+2026）は East Asian Width が Ambiguous で、端末によっては 2 桁になるため使わない。
 const ELLIPSIS: char = '~';
@@ -37,18 +38,21 @@ const MSG_OVERHEAD: usize = 2;
 /// 名前の後ろに付ける cwd を囲む ` (` と `)` の幅
 const CWD_OVERHEAD: usize = 3;
 /// [`ViewOptions::max_length`] の下限。
-/// アイコン（最大 2）と進捗（最大 ` 255%` の 5）に、名前の前の空白と [`MIN_NAME_WIDTH`] を足した幅。
+/// 状態アイコン（最大 2）と進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、
+/// 名前の後ろの `app` のアイコンと前の空白（Nerd Font モードで 2）を足した幅。
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
 /// - アイコンと進捗だけで上限を超えることがある（例：絵文字アイコン + ` 100%` で 7）
 /// - 上限に収めるために、名前が [`MIN_NAME_WIDTH`] より短く切り詰められて見分けられなくなる
-pub const MIN_MAX_LENGTH: usize = 12;
+pub const MIN_MAX_LENGTH: usize = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Role {
     /// 余白や区切り
     Plain,
-    /// アイコンと進捗。状態の色で塗る。
+    /// 名前の後ろの `app` のアイコン（Nerd Font モード）
+    App,
+    /// 状態アイコンと進捗。状態の色で塗る。
     State(AgentState),
     Name,
     Cwd,
@@ -77,6 +81,8 @@ struct Item {
     /// `42%` の形
     progress: Option<String>,
     name: String,
+    /// 名前の後ろに付ける `app` のアイコン（Nerd Font モードで、対応するアイコンがあるときだけ）
+    app_icon: Option<&'static str>,
     /// カレントディレクトリの末尾のディレクトリ名（`show_cwd` が false なら None）
     cwd: Option<String>,
     msg: Option<String>,
@@ -94,6 +100,7 @@ impl Item {
     /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
     /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
+    /// `app` のアイコンは名前の候補とは別なので、`show_app` に関係なく付ける。
     fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
         let app = agent.app.as_deref().filter(|_| options.show_app);
         let name = clean(agent.title.as_deref())
@@ -110,6 +117,11 @@ impl Item {
             icon: options.icons.icon(agent.state),
             progress: agent.progress.map(|p| format!("{p}%")),
             name,
+            app_icon: agent
+                .app
+                .as_deref()
+                .filter(|_| options.nerd_font)
+                .and_then(app_icon),
             cwd,
             msg: clean(agent.msg.as_deref()),
         }
@@ -118,6 +130,11 @@ impl Item {
     /// アイコンと進捗の幅（常に表示する部分）
     fn head_width(&self) -> usize {
         self.icon.width() + self.progress.as_ref().map_or(0, |p| 1 + p.width())
+    }
+
+    /// 名前に付く部分（前の空白と、後ろの `app` のアイコン）の幅。名前と一緒に表示し、一緒に省く
+    fn name_overhead(&self) -> usize {
+        1 + self.app_icon.map_or(0, |i| 1 + i.width())
     }
 
     /// 各部分の幅の上限（名前は常に Some）。`max_length` を指定していれば、1 エージェント分がその幅に収まるようにする。
@@ -134,8 +151,8 @@ impl Item {
                 msg,
             };
         };
-        // 名前（と cwd・msg）に使える幅。名前の前の空白を除く
-        let room = max_length.saturating_sub(self.head_width() + 1);
+        // 名前（と cwd・msg）に使える幅。名前の前の空白と後ろの app のアイコンを除く
+        let room = max_length.saturating_sub(self.head_width() + self.name_overhead());
         let cwd_total = cwd.map_or(0, |c| c + CWD_OVERHEAD);
         let fits = |width: usize, room: usize, min: usize| width <= room || room >= min;
 
@@ -166,7 +183,7 @@ impl Item {
         }
     }
 
-    /// cwd と msg は名前を表示するときだけ表示する。
+    /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
     fn spans(&self, widths: Widths) -> Vec<Span> {
         let mut spans = vec![Span::new(self.icon, Role::State(self.state))];
         if let Some(progress) = &self.progress {
@@ -175,6 +192,10 @@ impl Item {
         if let Some(width) = widths.name {
             spans.push(Span::new(" ", Role::Plain));
             spans.push(Span::new(truncate(&self.name, width), Role::Name));
+            if let Some(icon) = self.app_icon {
+                spans.push(Span::new(" ", Role::Plain));
+                spans.push(Span::new(icon, Role::App));
+            }
             if let (Some(text), Some(width)) = (&self.cwd, widths.cwd) {
                 spans.push(Span::new(" (", Role::Plain));
                 spans.push(Span::new(truncate(text, width), Role::Cwd));
@@ -232,11 +253,12 @@ pub(super) fn layout<'a>(
         return vec![];
     }
 
+    let sep = options.separator_text();
     let mut spans = vec![Span::new(PAD, Role::Plain)];
-    let plans = plan(&items, cols, options.max_length);
+    let plans = plan(&items, cols, sep.width(), options.max_length);
     for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {
-            spans.push(Span::new(SEP, Role::Plain));
+            spans.push(Span::new(sep, Role::Plain));
         }
         spans.extend(item.spans(widths));
     }
@@ -245,14 +267,17 @@ pub(super) fn layout<'a>(
 
 /// 各エージェントの各部分の幅を決める（縮める順はモジュールの説明を参照）。
 /// [`Item::widths`] で `max_length` に収めた幅を、行の幅に合わせてさらに縮める。
-fn plan(items: &[Item], cols: usize, max_length: Option<usize>) -> Vec<Widths> {
+/// `sep_width` はエージェント同士の区切りの幅。
+fn plan(items: &[Item], cols: usize, sep_width: usize, max_length: Option<usize>) -> Vec<Widths> {
     let fixed = PAD.width()
-        + SEP.width() * (items.len() - 1)
+        + sep_width * (items.len() - 1)
         + items.iter().map(Item::head_width).sum::<usize>();
     let caps: Vec<Widths> = items.iter().map(|i| i.widths(max_length)).collect();
+    // 名前は常に表示する前提（Item::widths で常に Some）
     let names = shown(&caps, |w| w.name);
-    // 名前の前の空白を含む
-    let names_total = names.iter().map(|w| 1 + w).sum::<usize>();
+    // 名前の前の空白と後ろの app のアイコン
+    let names_overhead = items.iter().map(Item::name_overhead).sum::<usize>();
+    let names_total = names.iter().sum::<usize>() + names_overhead;
     let cwds = shown(&caps, |w| w.cwd);
     let cwds_overhead = CWD_OVERHEAD * cwds.len();
     let cwds_total = cwds.iter().sum::<usize>() + cwds_overhead;
@@ -271,7 +296,7 @@ fn plan(items: &[Item], cols: usize, max_length: Option<usize>) -> Vec<Widths> {
         return assemble(&caps, Some(names), Some(cwds), None);
     }
 
-    if let Some(room) = cols.checked_sub(fixed + items.len())
+    if let Some(room) = cols.checked_sub(fixed + names_overhead)
         && let Some(names) = fit(&names, room, MIN_NAME_WIDTH)
     {
         return assemble(&caps, Some(names), None, None);
@@ -387,8 +412,8 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::IconStyle;
     use crate::view::tests::{agent, with_cwd, with_msg};
+    use crate::view::{IconStyle, Separator};
 
     fn plain(agents: &[AgentStatus], cols: usize) -> String {
         plain_with(agents, cols, &ViewOptions::default())
@@ -783,24 +808,46 @@ mod tests {
             agent(3, AgentState::Done),
         ];
         agents[0].progress = Some(100);
+        agents[0].app = Some("claude-code".to_owned());
         agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
         agents[2].title = Some("全角のタイトル".to_owned());
         agents[2].cwd = Some("/repo/main".into());
-        for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
+        for options in option_combinations() {
+            for cols in 0..120 {
+                let text = plain_with(&agents, cols, &options);
+                assert!(text.width() <= cols, "{options:?} cols={cols}: {text:?}");
+            }
+        }
+    }
+
+    /// アイコン・cwd・Nerd Font モード（区切り）の組み合わせ
+    fn option_combinations() -> Vec<ViewOptions> {
+        let styles = [
+            IconStyle::Symbol,
+            IconStyle::Alphabet,
+            IconStyle::Emoji,
+            IconStyle::Nerd,
+        ];
+        let modes = [
+            (false, Separator::Arrow),
+            (true, Separator::Arrow),
+            (true, Separator::Round),
+            (true, Separator::Slash),
+        ];
+        let mut combinations = vec![];
+        for style in styles {
             for show_cwd in [false, true] {
-                let options = ViewOptions {
-                    show_cwd,
-                    ..icons(style)
-                };
-                for cols in 0..120 {
-                    let text = plain_with(&agents, cols, &options);
-                    assert!(
-                        text.width() <= cols,
-                        "{style:?} show_cwd={show_cwd} cols={cols}: {text:?}"
-                    );
+                for (nerd_font, separator) in modes {
+                    combinations.push(ViewOptions {
+                        show_cwd,
+                        nerd_font,
+                        separator,
+                        ..icons(style)
+                    });
                 }
             }
         }
+        combinations
     }
 
     fn max_length(max_length: usize) -> ViewOptions {
@@ -814,7 +861,7 @@ mod tests {
     fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<usize> {
         let mut widths = vec![0];
         for span in layout(agents, cols, options).into_iter().skip(1) {
-            if span.role == Role::Plain && span.text == SEP {
+            if span.role == Role::Plain && span.text == options.separator_text() {
                 widths.push(0);
             } else {
                 *widths.last_mut().unwrap() += span.text.width();
@@ -850,16 +897,25 @@ mod tests {
     #[test]
     fn max_length_counts_icon_and_progress() {
         let mut a = with_msg(agent(1, AgentState::Working), "Running");
+        a.title = Some("my-project".to_owned());
         a.progress = Some(100);
         assert_eq!(
             plain_with(&[a.clone()], 80, &max_length(MIN_MAX_LENGTH)),
-            " ⟳ 100% clau~"
+            " ⟳ 100% my-pro~"
         );
         let emoji = ViewOptions {
             icons: IconStyle::Emoji,
             ..max_length(MIN_MAX_LENGTH)
         };
-        assert_eq!(plain_with(&[a], 80, &emoji), " ⏳ 100% cla~");
+        assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-pr~");
+        // Nerd Font モードでは名前の後ろの app のアイコンと空白の 2 も数える
+        a.app = Some("claude-code".to_owned());
+        let nerd = ViewOptions {
+            nerd_font: true,
+            icons: IconStyle::Nerd,
+            ..max_length(MIN_MAX_LENGTH)
+        };
+        assert_eq!(plain_with(&[a], 80, &nerd), " \u{f013} 100% my-p~ \u{ec82}");
     }
 
     #[test]
@@ -903,9 +959,19 @@ mod tests {
     #[test]
     fn min_max_length_fits_widest_head_and_min_name() {
         let mut a = agent(1, AgentState::Working);
+        a.app = Some("claude-code".to_owned());
         a.progress = Some(u8::MAX);
-        let item = Item::new(&a, &icons(IconStyle::Emoji));
-        assert!(item.head_width() + 1 + MIN_NAME_WIDTH <= MIN_MAX_LENGTH);
+        // 最も広いのは、Nerd Font モードで状態アイコンに絵文字を選んだとき
+        let options = ViewOptions {
+            nerd_font: true,
+            ..icons(IconStyle::Emoji)
+        };
+        let item = Item::new(&a, &options);
+        assert!(item.app_icon.is_some());
+        assert_eq!(
+            item.head_width() + item.name_overhead() + MIN_NAME_WIDTH,
+            MIN_MAX_LENGTH
+        );
     }
 
     fn max_length_with_cwd(max: usize) -> ViewOptions {
@@ -964,28 +1030,122 @@ mod tests {
             agent(3, AgentState::Done),
         ];
         agents[0].progress = Some(100);
+        agents[0].app = Some("claude-code".to_owned());
         agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
         agents[2].title = Some("全角のタイトル".to_owned());
         agents[2].cwd = Some("/repo/main".into());
-        for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Emoji] {
-            for show_cwd in [false, true] {
-                for max in MIN_MAX_LENGTH..40 {
-                    let options = ViewOptions {
-                        icons: style,
-                        show_cwd,
-                        ..max_length(max)
-                    };
-                    for cols in 0..100 {
-                        let text = plain_with(&agents, cols, &options);
-                        let case = format!("{style:?} show_cwd={show_cwd} max={max} cols={cols}");
-                        assert!(text.width() <= cols, "{case}");
-                        for width in agent_widths(&agents, cols, &options) {
-                            assert!(width <= max, "{case}: {text:?}");
-                        }
+        for base in option_combinations() {
+            for max in MIN_MAX_LENGTH..40 {
+                let options = ViewOptions {
+                    max_length: Some(max),
+                    ..base.clone()
+                };
+                for cols in 0..100 {
+                    let text = plain_with(&agents, cols, &options);
+                    let case = format!("{options:?} cols={cols}");
+                    assert!(text.width() <= cols, "{case}");
+                    for width in agent_widths(&agents, cols, &options) {
+                        assert!(width <= max, "{case}: {text:?}");
                     }
                 }
             }
         }
+    }
+
+    fn nerd_font(separator: Separator) -> ViewOptions {
+        ViewOptions {
+            nerd_font: true,
+            separator,
+            ..icons(IconStyle::Nerd)
+        }
+    }
+
+    #[test]
+    fn nerd_font_shows_app_icon_and_separator() {
+        let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
+        a.app = Some("claude-code".to_owned());
+        let mut b = agent(2, AgentState::Done);
+        b.app = Some("codex".to_owned());
+        let agents = [a, b];
+        // app のアイコンは名前の後ろ。対応するアイコンのない app（codex）には付けない
+        assert_eq!(
+            plain_with(&agents, 80, &nerd_font(Separator::Arrow)),
+            " \u{f013} claude-code \u{ec82}: Running tests \u{e0b1} \u{f00c} codex"
+        );
+        assert_eq!(
+            plain_with(&agents, 80, &nerd_font(Separator::Round)),
+            " \u{f013} claude-code \u{ec82}: Running tests \u{e0b5} \u{f00c} codex"
+        );
+        assert_eq!(
+            plain_with(&agents, 80, &nerd_font(Separator::Slash)),
+            " \u{f013} claude-code \u{ec82}: Running tests \u{e0bb} \u{f00c} codex"
+        );
+        // cwd は app のアイコンの後ろ
+        let with_dir = [with_cwd(agents[0].clone(), "/repo/main")];
+        let options = ViewOptions {
+            show_cwd: true,
+            ..nerd_font(Separator::Arrow)
+        };
+        assert_eq!(
+            plain_with(&with_dir, 80, &options),
+            " \u{f013} claude-code \u{ec82} (main): Running tests"
+        );
+        // Nerd Font モードでなければ、app のアイコンも区切り文字も使わない
+        let symbol_only = ViewOptions {
+            separator: Separator::Slash,
+            ..Default::default()
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &symbol_only),
+            " ⟳ claude-code: Running tests  ✓ codex"
+        );
+    }
+
+    #[test]
+    fn nerd_font_app_icon_ignores_show_app() {
+        let mut a = agent(7, AgentState::Idle);
+        a.app = Some("claude-code".to_owned());
+        let options = ViewOptions {
+            show_app: false,
+            ..nerd_font(Separator::Arrow)
+        };
+        assert_eq!(plain_with(&[a], 80, &options), " \u{f186} #7 \u{ec82}");
+    }
+
+    #[test]
+    fn nerd_font_can_be_combined_with_other_icon_styles() {
+        let mut a = agent(1, AgentState::Done);
+        a.app = Some("claude-code".to_owned());
+        let options = ViewOptions {
+            icons: IconStyle::Emoji,
+            ..nerd_font(Separator::Arrow)
+        };
+        assert_eq!(plain_with(&[a], 80, &options), " ✅ claude-code \u{ec82}");
+    }
+
+    #[test]
+    fn nerd_font_widths_are_counted_when_shortening() {
+        let mut a = agent(1, AgentState::Working);
+        a.app = Some("claude-code".to_owned());
+        a.title = Some("long-project-name".to_owned());
+        let b = agent(2, AgentState::Done);
+        let agents = [a, b];
+        let options = ViewOptions {
+            max_length: None,
+            ..nerd_font(Separator::Arrow)
+        };
+        // 固定部分：" " (1) + "\u{f013}" (1) + " \u{e0b1} " (3) + "\u{f00c}" (1) = 6
+        // 名前に付く部分：" " + " \u{ec82}" (3) と " " (1) = 4
+        // 名前に回せる幅は 22 - 6 - 4 = 12：短い "claude" に 6、残り 6 を長い方へ
+        assert_eq!(
+            plain_with(&agents, 22, &options),
+            " \u{f013} long-~ \u{ec82} \u{e0b1} \u{f00c} claude"
+        );
+        // 状態アイコンだけにする。app のアイコンも名前と一緒に省く
+        assert_eq!(
+            plain_with(&agents, 13, &options),
+            " \u{f013} \u{e0b1} \u{f00c}"
+        );
     }
 
     #[test]
