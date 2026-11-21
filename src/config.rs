@@ -13,6 +13,8 @@
 //!     show_cwd "true"
 //!     nerd_font "true"
 //!     separator "round"
+//!     nerd_font_icon_padding "true"
+//!     highlight_attention "true"
 //! }
 //! ```
 //!
@@ -26,6 +28,8 @@
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
 //! | `nerd_font` | `false` | Nerd Font モード。区切りを `separator` の文字にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
 //! | `separator` | `arrow` | Nerd Font モードの区切り文字（`arrow` / `round` / `slash`）。`nerd_font` が false なら使わない |
+//! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け |
+//! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -124,6 +128,24 @@ impl Config {
             }
         }
 
+        if let Some(value) = configuration.get("highlight_attention") {
+            match parse_bool(value) {
+                Some(highlight) => config.view.highlight_attention = highlight,
+                None => warnings.push(format!(
+                    "highlight_attention: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
+        if let Some(value) = configuration.get("nerd_font_icon_padding") {
+            match parse_bool(value) {
+                Some(padding) => config.view.nerd_font_icon_padding = padding,
+                None => warnings.push(format!(
+                    "nerd_font_icon_padding: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
         (config, warnings)
     }
 }
@@ -198,6 +220,8 @@ mod tests {
         assert!(!config.view.show_cwd);
         assert!(!config.view.nerd_font);
         assert_eq!(config.view.separator, Separator::Arrow);
+        assert!(!config.view.highlight_attention);
+        assert!(!config.view.nerd_font_icon_padding);
     }
 
     #[test]
@@ -329,7 +353,7 @@ mod tests {
 
     #[test]
     fn max_length() {
-        let cases = [("40", Some(40)), ("14", Some(MIN_MAX_LENGTH)), ("0", None)];
+        let cases = [("40", Some(40)), ("16", Some(MIN_MAX_LENGTH)), ("0", None)];
         for (value, expected) in cases {
             let (config, warnings) =
                 Config::from_configuration(&configuration(&[("max_length", value)]));
@@ -340,7 +364,7 @@ mod tests {
 
     #[test]
     fn invalid_max_length_falls_back_to_default_with_warning() {
-        for value in ["abc", "1", "13", "-1", "40.5", " 40", ""] {
+        for value in ["abc", "1", "15", "-1", "40.5", " 40", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("max_length", value),
                 ("apps", "claude"),
@@ -369,6 +393,59 @@ mod tests {
             assert!(!config.view.show_app, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("show_cwd:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn nerd_font_icon_padding() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("nerd_font_icon_padding", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.nerd_font_icon_padding, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_nerd_font_icon_padding_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("nerd_font_icon_padding", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.nerd_font_icon_padding, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(
+                warnings[0].starts_with("nerd_font_icon_padding:"),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn highlight_attention() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("highlight_attention", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.highlight_attention, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_highlight_attention_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("highlight_attention", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.highlight_attention, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("highlight_attention:"), "{value}");
         }
     }
 
