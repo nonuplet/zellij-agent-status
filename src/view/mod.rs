@@ -44,6 +44,11 @@ pub struct ViewOptions {
     pub nerd_font: bool,
     /// Nerd Font モードの区切り文字。`nerd_font` が false なら使わない
     pub separator: Separator,
+    /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
+    /// グリフが 1 桁からはみ出すかどうかはフォントと端末の組み合わせで変わり、プログラムからは判別できないため設定にしている。
+    pub nerd_font_icon_padding: bool,
+    /// 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色で塗って強調するか
+    pub highlight_attention: bool,
 }
 
 /// [`ViewOptions::max_length`] の既定値
@@ -61,6 +66,8 @@ impl Default for ViewOptions {
             show_cwd: false,
             nerd_font: false,
             separator: Separator::default(),
+            nerd_font_icon_padding: false,
+            highlight_attention: false,
         }
     }
 }
@@ -166,9 +173,8 @@ pub(crate) mod tests {
         out
     }
 
-    #[test]
-    fn paint_colors_spans_and_fills_width() {
-        let theme = Theme {
+    fn test_theme() -> Theme {
+        Theme {
             fg: Color::Indexed(7),
             bg: Color::Rgb(1, 2, 3),
             idle: Color::Indexed(8),
@@ -176,10 +182,21 @@ pub(crate) mod tests {
             blocked: Color::Indexed(3),
             done: Color::Indexed(2),
             error: Color::Indexed(1),
-        };
+        }
+    }
+
+    #[test]
+    fn paint_colors_spans_and_fills_width() {
+        let theme = test_theme();
         let a = [agent(1, AgentState::Error)];
         let line = render_line(&a, 20, &theme, &ViewOptions::default());
-        assert!(line.contains("\x1b[0;1;38;5;1;48;2;1;2;3m✗"), "{line:?}");
+        // バッジは状態の色の背景に、行の背景色の文字（反転）。端の空白は太字にしない
+        assert!(
+            line.contains(
+                "\x1b[0;38;2;1;2;3;48;5;1m \x1b[0;1;38;2;1;2;3;48;5;1m✗\x1b[0;38;2;1;2;3;48;5;1m "
+            ),
+            "{line:?}"
+        );
         assert!(
             line.contains("\x1b[0;1;38;5;7;48;2;1;2;3mclaude"),
             "{line:?}"
@@ -187,7 +204,7 @@ pub(crate) mod tests {
         assert!(line.ends_with("\x1b[0m"));
         let visible = strip_ansi(&line);
         assert_eq!(visible.width(), 20);
-        assert_eq!(visible.trim_end(), " ✗ claude");
+        assert_eq!(visible.trim_end(), "  ✗  claude");
 
         // Nerd Font モードの app のアイコンは前景色で、太字にしない
         let mut a = agent(1, AgentState::Error);
@@ -201,6 +218,41 @@ pub(crate) mod tests {
             line.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
             "{line:?}"
         );
+        // バッジの端の半円は、行の背景の上に状態の色の前景色で描き、太字にしない
+        assert!(
+            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0b6}"),
+            "{line:?}"
+        );
+        assert!(
+            line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0b4}"),
+            "{line:?}"
+        );
+    }
+
+    #[test]
+    fn paint_inverts_highlighted_agent_and_skips_emoji_badge() {
+        let theme = test_theme();
+        let a = [with_msg(agent(1, AgentState::Blocked), "Allow?")];
+        let highlight = ViewOptions {
+            highlight_attention: true,
+            ..Default::default()
+        };
+        let line = render_line(&a, 30, &theme, &highlight);
+        // 名前・msg も状態の色の背景に、行の背景色の文字で描く
+        assert!(
+            line.contains("\x1b[0;1;38;2;1;2;3;48;5;3mclaude"),
+            "{line:?}"
+        );
+        assert!(line.contains("\x1b[0;38;2;1;2;3;48;5;3mAllow?"), "{line:?}");
+
+        // 絵文字アイコンはバッジにしない（今までどおり前景色だけ）
+        let emoji = ViewOptions {
+            icons: IconStyle::Emoji,
+            ..Default::default()
+        };
+        let line = render_line(&a, 30, &theme, &emoji);
+        assert!(line.contains("\x1b[0;1;38;5;3;48;2;1;2;3m❗"), "{line:?}");
+        assert!(!line.contains("48;5;3"), "{line:?}");
     }
 
     #[test]

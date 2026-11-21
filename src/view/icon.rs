@@ -16,14 +16,16 @@ pub enum IconStyle {
     /// 絵文字は前景色で塗っても色が変わらないので、状態の色では区別できない。
     Emoji,
     /// Nerd Font のアイコン（Font Awesome 系）。幅は 1 桁として扱う（[`app_icon`] を参照）。
+    /// 設定によっては右隣に空白を置く（layout で付ける。[`app_icon`] を参照）。
     Nerd,
 }
 
 impl IconStyle {
     pub(super) fn icon(self, state: AgentState) -> &'static str {
         match (self, state) {
-            (IconStyle::Symbol, AgentState::Idle) => "◌",
-            (IconStyle::Symbol, AgentState::Working) => "⟳",
+            // バッジ（反転した背景）の上でも形が分かるよう、線の細い記号（`◌` / `⟳`）は避けている
+            (IconStyle::Symbol, AgentState::Idle) => "⋯",
+            (IconStyle::Symbol, AgentState::Working) => "↻",
             (IconStyle::Symbol, AgentState::Blocked) => "!",
             (IconStyle::Symbol, AgentState::Done) => "✓",
             (IconStyle::Symbol, AgentState::Error) => "✗",
@@ -57,6 +59,13 @@ impl IconStyle {
 /// （`unicode-width` の `width()` は 1、`width_cjk()` は 2）。幅は 1 桁として扱う。
 /// 端末で Ambiguous を 2 桁にしていると表示がずれる（README に注意として書いている）。
 /// Material Design 系（U+F0000 以降）は避け、BMP の Private Use Area の文字を使う。
+///
+/// アイコンのグリフは 1 桁から右にはみ出して描かれることがある。はみ出すかどうか・どれだけはみ出すかは
+/// フォントと端末の組み合わせで変わる（Mono 版のフォントでもはみ出すものがある。1 桁に収まるフォントでは、
+/// 端末によってアイコンが小さく潰れて見分けられないことがある）。
+/// 右隣が空白でないと、はみ出した部分が切れたり隣の文字と重なったりする。プログラムからは判別できないので、
+/// `nerd_font_icon_padding` が true のときだけ、状態アイコン・`app` のアイコンの右隣に layout で空白を置く。
+/// 区切り文字（[`super::separator`]）は常に前後に空白を付けている。
 pub(super) fn app_icon(app: &str) -> Option<&'static str> {
     match app {
         "claude-code" => Some("\u{ec82}"),

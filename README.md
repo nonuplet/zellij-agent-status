@@ -25,22 +25,30 @@ pane size=1 borderless=true {
         show_cwd "true"
         nerd_font "true"
         separator "round"
+        nerd_font_icon_padding "true"
+        highlight_attention "true"
     }
 }
 ```
 
 | キー | 既定値 | 内容 |
 |---|---|---|
-| `icon_style` | `symbol`（`nerd_font` が `true` なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか。絵文字は状態の色で塗られない |
+| `icon_style` | `symbol`（`nerd_font` が `true` なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか。絵文字は状態の色で塗られず、バッジにもならない |
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
 | `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
-| `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。14 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
+| `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。16 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
 | `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |
 | `nerd_font` | `false` | Nerd Font モード（`true` / `false`）。区切りを `separator` の文字にし、名前の後ろにエージェント（`app`）のアイコンを付け（今は Claude Code のみ）、`icon_style` の既定値を `nerd` にする。`icon_style` を指定すればそちらが優先される |
 | `separator` | `arrow` | Nerd Font モードの区切り文字。Powerline の細い矢印（`arrow`）、半円（`round`）、スラッシュ（`slash`）のどれか。`nerd_font` が `false` なら使わない |
+| `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う |
+| `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
+
+状態アイコンと進捗は、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を半円にします）。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
 
 `nerd_font` と `icon_style "nerd"` には、端末のフォントが [Nerd Fonts](https://www.nerdfonts.com/) である必要があります。Nerd Font のアイコンは 1 桁として幅を計算します。これらの文字は East Asian Width が Ambiguous なので、端末で Ambiguous な文字を 2 桁で表示する設定にしていると、表示がずれたり行からはみ出したりします。
+
+Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと端末の組み合わせで変わります（Mono 版のフォントでもはみ出すことがあり、1 桁に収まるフォントでは端末によってアイコンが潰れて見分けられないことがあります）。アイコンの右が切れたり隣の文字と重なったりするときは、`nerd_font_icon_padding "true"` を指定してください。
 
 `show_cwd` で表示されるのは、ペインのルートプロセス（通常はシェル）のカレントディレクトリです。エージェントが中で別のディレクトリ（worktree など）に移っても追従せず、SSH 先やサンドボックス内で動くエージェントでは手元のシェルのディレクトリが表示されます。worktree ごとに見分けたいときは、そのディレクトリに `cd` してからエージェントを起動してください。
 
