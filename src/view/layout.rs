@@ -11,8 +11,11 @@
 //! 端の文字（[`BadgeEnds`]。Nerd Font モードでは [`ViewOptions::badge_shape`] の形）を付ける。
 //! Nerd Font モードでは、左端とアイコンの間に塗った空白を 1 つ置く（[`BadgeEnds::inner_pad`]）。
 //! 絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、バッジにせず端の文字も付けない。
+//! [`ViewOptions::badge_name`] が true なら、名前（と `app` のアイコン・cwd）までをバッジにする
+//! （`[↻ 42% 名前 (cwd)]: msg`）。名前を省いたときは、状態アイコンと進捗だけのバッジに戻る。
 //! [`ViewOptions::highlight_attention`] が true なら、`Blocked` / `Error` のエージェントは 1 つ分全体を
-//! バッジにする（`[! 名前: msg]`）。端の文字をエージェントの両端に移すだけなので、強調しても幅は変わらない。
+//! バッジにする（`[! 名前: msg]`）。
+//! どちらも右端の文字を後ろに移すだけなので、幅は変わらない。
 //!
 //! [`ViewOptions::max_length`] を指定しているときは、まず 1 エージェント分（アイコン・進捗を含む）を
 //! その幅に収める。msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて cwd を切り詰め、
@@ -189,6 +192,9 @@ struct Item {
     ends: Option<BadgeEnds>,
     /// エージェント 1 つ分全体をバッジにするか（[`ViewOptions::highlight_attention`]）
     highlight: bool,
+    /// 名前（と `app` のアイコン・cwd）までをバッジにするか（[`ViewOptions::badge_name`]）。
+    /// バッジにしない（[`Item::ends`] が None）なら false
+    badge_name: bool,
     icon: &'static str,
     /// 状態アイコンが Nerd Font か
     nerd_icon: bool,
@@ -228,11 +234,13 @@ impl Item {
             .as_deref()
             .filter(|_| options.show_cwd)
             .and_then(|cwd| clean(Some(&dir_name(cwd))));
+        let ends = BadgeEnds::new(options);
         Item {
             state: agent.state,
-            ends: BadgeEnds::new(options),
+            ends,
             highlight: options.highlight_attention
                 && matches!(agent.state, AgentState::Blocked | AgentState::Error),
+            badge_name: options.badge_name && ends.is_some(),
             icon: options.icons.icon(agent.state),
             nerd_icon: options.icons == IconStyle::Nerd,
             icon_padding: options.nerd_font_icon_padding,
@@ -249,7 +257,7 @@ impl Item {
     }
 
     /// アイコンと進捗、バッジの両端と左端の後ろの空白の幅（常に表示する部分）。
-    /// 強調したときはバッジの右端がエージェントの末尾に移るが、幅は同じなのでここに含める。
+    /// 名前を入れたり強調したりするとバッジの右端が後ろに移るが、幅は同じなのでここに含める。
     fn head_width(&self) -> usize {
         self.icon.width()
             + self.progress.as_ref().map_or(0, |p| 1 + p.width())
@@ -320,60 +328,65 @@ impl Item {
 
     /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
     ///
-    /// バッジは `左端 空白 アイコン 進捗 右端`。強調するときは右端をエージェントの末尾に移し、全体を塗る。
+    /// 1 エージェント分を `空白 アイコン 進捗` / ` 名前 <app> (cwd)` / `: msg` の 3 つに分け、
+    /// 先頭から続けてバッジに入れる（塗る）。バッジの右端は、最初に入れない部分の手前に置く。
+    /// - 左端の後ろの空白（[`BadgeEnds::inner_pad`]）とアイコンと進捗：端の文字があるか、強調するときに入れる
+    /// - 名前（と `app` のアイコン・cwd）：[`Item::badge_name`] か、強調するときに入れる
+    /// - msg：強調するときだけ入れる
+    ///
+    /// 名前を省いたときは名前の部分が空になるので、右端はアイコンと進捗の直後に来る。
     /// 絵文字アイコン（端の文字なし）は左端の後ろの空白も付けないが、強調するときは全体を塗る。
     fn spans(&self, widths: Widths) -> Vec<Span> {
         let state = Fill::State(self.state);
-        let badge = if self.ends.is_some() || self.highlight {
-            state
-        } else {
-            Fill::None
-        };
-        let (left, right) = self.ends.map(|e| e.spans(self.state)).unzip();
+        let (left, mut right) = self.ends.map(|e| e.spans(self.state)).unzip();
 
-        let mut spans: Vec<Span> = left.into_iter().collect();
+        let mut head = vec![];
         if self.ends.is_some_and(BadgeEnds::inner_pad) {
-            spans.push(Span::new(" ", Role::State(self.state)).with_fill(badge));
+            head.push(Span::new(" ", Role::State(self.state)));
         }
-        spans.push(Span::new(self.icon, Role::State(self.state)).with_fill(badge));
+        head.push(Span::new(self.icon, Role::State(self.state)));
         if let Some(progress) = &self.progress {
-            spans.push(Span::new(format!(" {progress}"), Role::State(self.state)).with_fill(badge));
+            head.push(Span::new(format!(" {progress}"), Role::State(self.state)));
         }
         if self.icon_pad() {
-            spans.push(Span::new(" ", Role::State(self.state)).with_fill(badge));
+            head.push(Span::new(" ", Role::State(self.state)));
         }
-        // 強調しないときは、ここでバッジを閉じる
-        let right = if self.highlight {
-            right
-        } else {
-            spans.extend(right);
-            None
-        };
-        // ここから後ろ（名前・cwd・msg）は、強調するときだけ塗る
-        let rest = spans.len();
+        let mut label = vec![];
+        let mut msg = vec![];
         if let Some(width) = widths.name {
-            spans.push(Span::new(" ", Role::Plain));
-            spans.push(Span::new(truncate(&self.name, width), Role::Name));
+            label.push(Span::new(" ", Role::Plain));
+            label.push(Span::new(truncate(&self.name, width), Role::Name));
             if let Some(icon) = self.app_icon {
-                spans.push(Span::new(" ", Role::Plain));
-                spans.push(Span::new(icon, Role::App));
+                label.push(Span::new(" ", Role::Plain));
+                label.push(Span::new(icon, Role::App));
                 if self.icon_padding {
-                    spans.push(Span::new(" ", Role::Plain));
+                    label.push(Span::new(" ", Role::Plain));
                 }
             }
             if let (Some(text), Some(width)) = (&self.cwd, widths.cwd) {
-                spans.push(Span::new(" (", Role::Plain));
-                spans.push(Span::new(truncate(text, width), Role::Cwd));
-                spans.push(Span::new(")", Role::Plain));
+                label.push(Span::new(" (", Role::Plain));
+                label.push(Span::new(truncate(text, width), Role::Cwd));
+                label.push(Span::new(")", Role::Plain));
             }
             if let (Some(text), Some(width)) = (&self.msg, widths.msg) {
-                spans.push(Span::new(": ", Role::Plain));
-                spans.push(Span::new(truncate(text, width), Role::Msg));
+                msg.push(Span::new(": ", Role::Plain));
+                msg.push(Span::new(truncate(text, width), Role::Msg));
             }
         }
-        if self.highlight {
-            for span in &mut spans[rest..] {
-                span.fill = state;
+
+        let parts = [
+            (head, self.ends.is_some() || self.highlight),
+            (label, self.badge_name || self.highlight),
+            (msg, self.highlight),
+        ];
+        let mut spans: Vec<Span> = left.into_iter().collect();
+        for (part, in_badge) in parts {
+            if in_badge {
+                spans.extend(part.into_iter().map(|s| s.with_fill(state)));
+            } else {
+                // バッジに入れる部分は先頭から続いているので、最初に入れない部分の手前で閉じる
+                spans.extend(right.take());
+                spans.extend(part);
             }
         }
         spans.extend(right);
@@ -586,6 +599,7 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::DEFAULT_MAX_LENGTH;
     use crate::view::icon::tests::assert_nerd_font_glyph;
     use crate::view::tests::{agent, with_cwd, with_msg};
 
@@ -992,8 +1006,8 @@ mod tests {
         assert_eq!(plain(&a, 21), " [!] claude: 許可し~");
     }
 
-    #[test]
-    fn never_exceeds_width() {
+    /// 幅を総当たりで確かめるための、進捗・app のアイコン・cwd・msg・全角文字を含むエージェント
+    fn mixed_agents() -> Vec<AgentStatus> {
         let mut agents = vec![
             with_msg(agent(1, AgentState::Working), "テストを実行しています"),
             with_msg(agent(2, AgentState::Blocked), "Allow Bash(cargo test)?"),
@@ -1004,6 +1018,12 @@ mod tests {
         agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
         agents[2].title = Some("全角のタイトル".to_owned());
         agents[2].cwd = Some("/repo/main".into());
+        agents
+    }
+
+    #[test]
+    fn never_exceeds_width() {
+        let agents = mixed_agents();
         for options in option_combinations() {
             for cols in 0..120 {
                 let text = plain_with(&agents, cols, &options);
@@ -1012,7 +1032,7 @@ mod tests {
         }
     }
 
-    /// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白の組み合わせ。
+    /// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白・バッジの中の名前の組み合わせ。
     /// アイコンの後ろの空白が効かない組み合わせでは、同じ設定が 2 回入る（重複は気にしない）
     fn option_combinations() -> Vec<ViewOptions> {
         let styles = [
@@ -1035,14 +1055,17 @@ mod tests {
                         // アイコンの後ろの空白は Nerd Font のアイコンがあるときだけ効く
                         let uses_nerd_icon = nerd_font || style == IconStyle::Nerd;
                         for nerd_font_icon_padding in [false, uses_nerd_icon] {
-                            combinations.push(ViewOptions {
-                                show_cwd,
-                                nerd_font,
-                                badge_shape,
-                                highlight_attention,
-                                nerd_font_icon_padding,
-                                ..icons(style)
-                            });
+                            for badge_name in [false, true] {
+                                combinations.push(ViewOptions {
+                                    show_cwd,
+                                    nerd_font,
+                                    badge_shape,
+                                    highlight_attention,
+                                    nerd_font_icon_padding,
+                                    badge_name,
+                                    ..icons(style)
+                                });
+                            }
                         }
                     }
                 }
@@ -1248,17 +1271,10 @@ mod tests {
 
     #[test]
     fn never_exceeds_max_length() {
-        let mut agents = vec![
-            with_msg(agent(1, AgentState::Working), "テストを実行しています"),
-            with_msg(agent(2, AgentState::Blocked), "Allow Bash(cargo test)?"),
-            agent(3, AgentState::Done),
-        ];
-        agents[0].progress = Some(100);
-        agents[0].app = Some("claude-code".to_owned());
-        agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
-        agents[2].title = Some("全角のタイトル".to_owned());
-        agents[2].cwd = Some("/repo/main".into());
-        for base in option_combinations() {
+        let agents = mixed_agents();
+        // badge_name は端の文字を移すだけで幅を変えない（badge_name_only_moves_badge_end で確かめる）ので、
+        // 時間のかかるこのテストでは組み合わせから外す
+        for base in option_combinations().into_iter().filter(|o| !o.badge_name) {
             for max in MIN_MAX_LENGTH..40 {
                 let options = ViewOptions {
                     max_length: Some(max),
@@ -1617,6 +1633,187 @@ mod tests {
             " ❌ claude: failed  ✅ claude"
         );
         assert_eq!(filled_runs(&agents, 80, &options), ["❌ claude: failed"]);
+    }
+
+    fn badge_name(options: ViewOptions) -> ViewOptions {
+        ViewOptions {
+            badge_name: true,
+            ..options
+        }
+    }
+
+    #[test]
+    fn badge_name_puts_name_into_badge() {
+        let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
+        a.progress = Some(42);
+        let mut b = agent(2, AgentState::Done);
+        b.app = Some("codex".to_owned());
+        let agents = [a, b];
+        let options = badge_name(ViewOptions::default());
+        let line = plain_with(&agents, 80, &options);
+        assert_eq!(line, " [↻ 42% claude]: Running tests  [✓ codex]");
+        assert_eq!(
+            filled_runs(&agents, 80, &options),
+            [" ↻ 42% claude ", " ✓ codex "]
+        );
+        // 端の文字を移すだけなので、幅は変わらない
+        assert_eq!(line.width(), plain(&agents, 80).width());
+        // 既定では名前をバッジに入れない
+        assert_eq!(
+            plain(&agents, 80),
+            " [↻ 42%] claude: Running tests  [✓] codex"
+        );
+    }
+
+    #[test]
+    fn badge_name_includes_cwd_and_follows_shortening() {
+        let options = badge_name(show_cwd());
+        let a = with_msg(
+            with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
+            "Running tests",
+        );
+        let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
+        let agents = [a, b];
+        let line = |cols| plain_with(&agents, cols, &options);
+
+        assert_eq!(
+            line(62),
+            " [↻ claude (feature-branch)]: Running tests  [✓ claude (main)]"
+        );
+        assert_eq!(
+            filled_runs(&agents, 62, &options),
+            [" ↻ claude (feature-branch) ", " ✓ claude (main) "]
+        );
+        // 1. msg を切り詰める
+        assert_eq!(
+            line(55),
+            " [↻ claude (feature-branch)]: Runni~  [✓ claude (main)]"
+        );
+        // 2. msg を省き、cwd を切り詰める（~ もバッジの中）
+        assert_eq!(line(54), " [↻ claude (feature-branch)]  [✓ claude (main)]");
+        assert_eq!(line(37), " [↻ claude (fea~)]  [✓ claude (main)]");
+        // 3. cwd を省き、名前を切り詰める
+        assert_eq!(line(36), " [↻ claude]  [✓ claude]");
+        // 4. アイコンだけにすると、今のバッジの形に戻る
+        assert_eq!(line(16), " [↻]  [✓]");
+        assert_eq!(filled_runs(&agents, 16, &options), [" ↻ ", " ✓ "]);
+    }
+
+    #[test]
+    fn badge_name_puts_truncated_name_into_badge() {
+        let mut a = agent(1, AgentState::Working);
+        a.title = Some("long-project-name".to_owned());
+        let b = agent(2, AgentState::Done);
+        let agents = [a, b];
+        let options = badge_name(ViewOptions::default());
+        assert_eq!(
+            plain_with(&agents, 24, &options),
+            " [↻ long-p~]  [✓ claude]"
+        );
+        assert_eq!(
+            filled_runs(&agents, 24, &options),
+            [" ↻ long-p~ ", " ✓ claude "]
+        );
+        // 縮めたときも max_length で切り詰めたときも、端の文字を移すだけ
+        let long = [agents[0].clone()];
+        assert_eq!(
+            plain_with(&long, 80, &badge_name(max_length(16))),
+            " [↻ long-projec~]"
+        );
+    }
+
+    #[test]
+    fn badge_name_only_moves_badge_end() {
+        let agents = mixed_agents();
+        let strip = |line: String| line.replace(['[', ']'], "");
+        let max_lengths = [None, Some(MIN_MAX_LENGTH), Some(DEFAULT_MAX_LENGTH)];
+        for base in option_combinations().into_iter().filter(|o| !o.badge_name) {
+            for max_length in max_lengths {
+                let base = ViewOptions {
+                    max_length,
+                    ..base.clone()
+                };
+                let options = badge_name(base.clone());
+                for cols in 0..120 {
+                    let with = plain_with(&agents, cols, &options);
+                    let without = plain_with(&agents, cols, &base);
+                    assert_eq!(strip(with), strip(without), "{options:?} cols={cols}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn badge_name_with_nerd_font_puts_app_icon_into_badge() {
+        let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
+        a.app = Some("claude-code".to_owned());
+        let a = [a];
+        let options = badge_name(nerd_font(BadgeShape::Round));
+        let raw = |options: &ViewOptions| -> String {
+            layout(&a, 80, options)
+                .into_iter()
+                .map(|s| s.text)
+                .collect()
+        };
+        assert_eq!(
+            raw(&options),
+            " \u{e0b6} \u{f013} claude-code \u{ec82}\u{e0b4}: Running tests"
+        );
+        // 左端の後ろの空白から app のアイコンまでを塗る
+        assert_eq!(
+            filled_runs(&a, 80, &options),
+            [" \u{f013} claude-code \u{ec82}"]
+        );
+        // app のアイコンの後ろの空白もバッジに入る
+        let padded = ViewOptions {
+            nerd_font_icon_padding: true,
+            ..options
+        };
+        assert_eq!(
+            raw(&padded),
+            " \u{e0b6} \u{f013}  claude-code \u{ec82} \u{e0b4}: Running tests"
+        );
+    }
+
+    #[test]
+    fn badge_name_is_ignored_with_emoji() {
+        let agents = [
+            with_msg(agent(1, AgentState::Error), "failed"),
+            agent(2, AgentState::Done),
+        ];
+        let emoji = icons(IconStyle::Emoji);
+        assert_eq!(
+            plain_with(&agents, 80, &badge_name(emoji.clone())),
+            plain_with(&agents, 80, &emoji)
+        );
+        assert!(filled_runs(&agents, 80, &badge_name(emoji.clone())).is_empty());
+        // 強調するときは、今と同じく強調したエージェントだけ全体を塗る
+        let highlighted = highlight(emoji);
+        assert_eq!(
+            filled_runs(&agents, 80, &badge_name(highlighted)),
+            ["❌ claude: failed"]
+        );
+    }
+
+    #[test]
+    fn badge_name_with_highlight_attention() {
+        use AgentState::*;
+        let mut agents = named_agents([Idle, Blocked, Working, Done, Error]);
+        for a in &mut agents {
+            if a.title.as_deref() == Some("b") {
+                a.msg = Some("Allow Bash?".to_owned());
+            }
+        }
+        let options = badge_name(highlight(ViewOptions::default()));
+        // 強調したエージェント（b, e）は今と同じく全体を塗り、それ以外は名前までをバッジにする
+        assert_eq!(
+            plain_with(&agents, 80, &options),
+            " [⋯ a]  [! b: Allow Bash?]  [↻ c]  [✓ d]  [✗ e]"
+        );
+        assert_eq!(
+            filled_runs(&agents, 80, &options),
+            [" ⋯ a ", " ! b: Allow Bash? ", " ↻ c ", " ✓ d ", " ✗ e "]
+        );
     }
 
     #[test]

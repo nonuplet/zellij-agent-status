@@ -27,6 +27,7 @@ pane size=1 borderless=true {
         badge_shape "round"
         nerd_font_icon_padding "true"
         highlight_attention "true"
+        badge_name "true"
     }
 }
 ```
@@ -43,6 +44,7 @@ pane size=1 borderless=true {
 | `badge_shape` | `slash` | Nerd Font モードの状態バッジの端の形。斜め（`slash`）、矢印（`arrow`）、半円（`round`）のどれか。`nerd_font` が `false` なら使わない |
 | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う |
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
+| `badge_name` | `false` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。幅は変わらない。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジに戻る。絵文字アイコンはバッジにならないので効かない |
 
 状態アイコンと進捗は、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を `badge_shape` の形にします）。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
 

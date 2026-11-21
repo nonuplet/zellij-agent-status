@@ -46,6 +46,8 @@ pub struct ViewOptions {
     pub nerd_font_icon_padding: bool,
     /// 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色で塗って強調するか
     pub highlight_attention: bool,
+    /// 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコン（バッジにしない）では使わない
+    pub badge_name: bool,
 }
 
 /// [`ViewOptions::max_length`] の既定値
@@ -65,6 +67,7 @@ impl Default for ViewOptions {
             badge_shape: BadgeShape::default(),
             nerd_font_icon_padding: false,
             highlight_attention: false,
+            badge_name: false,
         }
     }
 }

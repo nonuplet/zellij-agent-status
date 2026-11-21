@@ -15,6 +15,7 @@
 //!     badge_shape "round"
 //!     nerd_font_icon_padding "true"
 //!     highlight_attention "true"
+//!     badge_name "true"
 //! }
 //! ```
 //!
@@ -30,6 +31,7 @@
 //! | `badge_shape` | `slash` | Nerd Font モードのバッジの端の形（`slash` / `arrow` / `round`）。`nerd_font` が false なら使わない |
 //! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け |
 //! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
+//! | `badge_name` | `false` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコンでは使わない |
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -146,6 +148,15 @@ impl Config {
             }
         }
 
+        if let Some(value) = configuration.get("badge_name") {
+            match parse_bool(value) {
+                Some(badge_name) => config.view.badge_name = badge_name,
+                None => warnings.push(format!(
+                    "badge_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
         (config, warnings)
     }
 }
@@ -222,6 +233,7 @@ mod tests {
         assert_eq!(config.view.badge_shape, BadgeShape::Slash);
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
+        assert!(!config.view.badge_name);
     }
 
     #[test]
@@ -446,6 +458,31 @@ mod tests {
             assert!(!config.view.show_app, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("highlight_attention:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn badge_name() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("badge_name", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.badge_name, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_badge_name_falls_back_to_default_with_warning() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("badge_name", value),
+                ("show_app", "false"),
+            ]));
+            assert!(!config.view.badge_name, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("badge_name:"), "{value}");
         }
     }
 
