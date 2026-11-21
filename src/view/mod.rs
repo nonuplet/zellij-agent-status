@@ -36,7 +36,7 @@ pub struct ViewOptions {
     pub max_length: Option<usize>,
     /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
-    /// Nerd Font モード。バッジの端を [`ViewOptions::badge_shape`] の形にし、名前の後ろに
+    /// Nerd Font モード。バッジの端を [`ViewOptions::badge_shape`] の形にし、名前の前に
     /// `app` のアイコンを付ける。状態アイコン（[`ViewOptions::icons`]）は config 側で切り替える。
     pub nerd_font: bool,
     /// Nerd Font モードのバッジの端の形。`nerd_font` が false なら使わない
@@ -46,6 +46,9 @@ pub struct ViewOptions {
     pub nerd_font_icon_padding: bool,
     /// 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色で塗って強調するか
     pub highlight_attention: bool,
+    /// 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコン（バッジにしない）では使わない。
+    /// アイコンがバッジの端で切れたり重なったりしないよう、既定で入れる（`src/view/layout.rs` を参照）
+    pub badge_name: bool,
 }
 
 /// [`ViewOptions::max_length`] の既定値
@@ -65,6 +68,7 @@ impl Default for ViewOptions {
             badge_shape: BadgeShape::default(),
             nerd_font_icon_padding: false,
             highlight_attention: false,
+            badge_name: true,
         }
     }
 }
@@ -180,31 +184,59 @@ pub(crate) mod tests {
         let line = render_line(&a, 20, &theme, &ViewOptions::default());
         // バッジは状態の色の背景に、行の背景色の文字（反転）。端の空白は太字にしない
         assert!(
-            line.contains(
-                "\x1b[0;38;2;1;2;3;48;5;1m \x1b[0;1;38;2;1;2;3;48;5;1m✗\x1b[0;38;2;1;2;3;48;5;1m "
-            ),
+            line.contains("\x1b[0;38;2;1;2;3;48;5;1m \x1b[0;1;38;2;1;2;3;48;5;1m✗"),
+            "{line:?}"
+        );
+        // 名前もバッジの中なので反転させる（太字のまま）。その後ろが右端の空白
+        assert!(
+            line.contains("\x1b[0;1;38;2;1;2;3;48;5;1mclaude\x1b[0;38;2;1;2;3;48;5;1m "),
+            "{line:?}"
+        );
+        assert!(line.ends_with("\x1b[0m"));
+        let visible = strip_ansi(&line);
+        assert_eq!(visible.width(), 20);
+        assert_eq!(visible.trim_end(), "  ✗ claude");
+
+        // 名前をバッジに入れなければ、アイコンの直後が右端の空白で、名前は前景色のまま
+        let without = ViewOptions {
+            badge_name: false,
+            ..Default::default()
+        };
+        let line = render_line(&a, 20, &theme, &without);
+        assert!(
+            line.contains("\x1b[0;1;38;2;1;2;3;48;5;1m✗\x1b[0;38;2;1;2;3;48;5;1m "),
             "{line:?}"
         );
         assert!(
             line.contains("\x1b[0;1;38;5;7;48;2;1;2;3mclaude"),
             "{line:?}"
         );
-        assert!(line.ends_with("\x1b[0m"));
-        let visible = strip_ansi(&line);
-        assert_eq!(visible.width(), 20);
-        assert_eq!(visible.trim_end(), "  ✗  claude");
+        assert_eq!(strip_ansi(&line).trim_end(), "  ✗  claude");
 
-        // Nerd Font モードの app のアイコンは前景色で、太字にしない
+        // Nerd Font モードの app のアイコンは太字にしない。バッジの中では反転させ、外では前景色
         let mut a = agent(1, AgentState::Error);
         a.app = Some("claude-code".to_owned());
         let nerd = ViewOptions {
             nerd_font: true,
             ..Default::default()
         };
-        let line = render_line(&[a], 20, &theme, &nerd);
+        let line = render_line(&[a.clone()], 20, &theme, &nerd);
         assert!(
-            line.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
+            line.contains("\x1b[0;38;2;1;2;3;48;5;1m\u{ec82}"),
             "{line:?}"
+        );
+        let line_without = render_line(
+            &[a],
+            20,
+            &theme,
+            &ViewOptions {
+                badge_name: false,
+                ..nerd.clone()
+            },
+        );
+        assert!(
+            line_without.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
+            "{line_without:?}"
         );
         // バッジの端の文字（既定の slash）は、行の背景の上に状態の色の前景色で描き、太字にしない
         assert!(
