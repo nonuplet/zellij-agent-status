@@ -1,21 +1,29 @@
 //! レイアウト：どのエージェントを、どの順で、どの文字列をどの役割で並べるかを決める。
 //!
 //! 1 エージェント分は `アイコン 進捗 名前 (cwd): msg` の形（進捗・cwd・msg はあるときだけ）。
-//! Nerd Font モードでは、名前の後ろに `app` のアイコンを付けて `名前 <app> (cwd)` の形にする（対応するアイコンがあるときだけ）。
+//! Nerd Font モードでは、名前の前に `app` のアイコンを付けて `<app> 名前 (cwd)` の形にする（対応するアイコンがあるときだけ）。
 //! `app` のアイコンは名前と一体で扱い、名前を省くときは一緒に省く。
 //! [`ViewOptions::nerd_font_icon_padding`] が true なら、Nerd Font のアイコン（状態アイコンと `app` のアイコン）の
-//! 右隣に必ず空白を置く（`[<icon> ] 名前 <app> : msg`。[`app_icon`] を参照）。
+//! 右隣に必ず空白を置く（`[<icon> ] <app>  名前: msg`。[`app_icon`] を参照）。
 //! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
 //!
-//! 状態アイコンと進捗は、状態の色で背景を塗ったバッジ（`[↻ 42%] 名前`）にする。バッジの両端には
-//! 端の文字（[`BadgeEnds`]。Nerd Font モードでは [`ViewOptions::badge_shape`] の形）を付ける。
-//! Nerd Font モードでは、左端とアイコンの間に塗った空白を 1 つ置く（[`BadgeEnds::inner_pad`]）。
+//! 状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色で背景を塗ったバッジ（`[↻ 42% 名前 (cwd)] msg`）にする。
+//! バッジの右端が名前と msg の境目になるので、間は `: ` ではなく空白 1 つにする（[`Item::msg_separator`]）。
+//! バッジの両端には端の文字（[`BadgeEnds`]。Nerd Font モードでは [`ViewOptions::badge_shape`] の形）を付ける。
+//! Nerd Font モードでは、両端の文字の内側（左端の後ろと右端の手前）に塗った空白を 1 つずつ置く（[`BadgeEnds::inner_pad`]）。
 //! 絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、バッジにせず端の文字も付けない。
-//! [`ViewOptions::badge_name`] が true なら、名前（と `app` のアイコン・cwd）までをバッジにする
-//! （`[↻ 42% 名前 (cwd)]: msg`）。名前を省いたときは、状態アイコンと進捗だけのバッジに戻る。
+//!
+//! 名前までバッジに入れるのは、アイコンの右がバッジの右端の文字に重なったり切れたりするのを避けるため。
+//! Mono 版でない Nerd Font などでは、アイコンが 1 桁からはみ出して 1.5〜2 桁ほどの幅で描かれることがある
+//! （記号のアイコンでも右の余白が少ないものがある）。アイコンの後ろに文字が続けば、はみ出した分は
+//! 次の空白に重なるだけで目立たない。`app` のアイコンを名前の前に置くのも同じ理由で、バッジの末尾がアイコンにならないようにしている。
+//! [`ViewOptions::badge_name`] が false なら、状態アイコンと進捗だけをバッジにする（`[↻ 42%] 名前: msg`）。
+//! 名前を省いたとき（縮める段階 4）も、状態アイコンと進捗だけのバッジになる。
+//!
 //! [`ViewOptions::highlight_attention`] が true なら、`Blocked` / `Error` のエージェントは 1 つ分全体を
-//! バッジにする（`[! 名前: msg]`）。
-//! どちらも右端の文字を後ろに移すだけなので、幅は変わらない。
+//! バッジにする（`[! 名前: msg]`）。名前と msg の間に境目がなくなるので、間は `: ` にする。
+//! 名前を入れるかどうかと強調するかどうかで変わるのは右端の文字の位置と msg の前の区切りだけで、
+//! msg がなければ幅は変わらない。msg があると、名前までバッジに入れて強調しないときだけ、区切りが 1 桁狭い。
 //!
 //! [`ViewOptions::max_length`] を指定しているときは、まず 1 エージェント分（アイコン・進捗を含む）を
 //! その幅に収める。msg を切り詰め、[`MIN_MSG_WIDTH`] を下回るなら msg を省いて cwd を切り詰め、
@@ -47,28 +55,26 @@ const ELLIPSIS: char = '~';
 const MIN_MSG_WIDTH: usize = 6;
 const MIN_CWD_WIDTH: usize = 4;
 const MIN_NAME_WIDTH: usize = 4;
-/// 名前と msg の間に入る `: ` の幅
-const MSG_OVERHEAD: usize = 2;
 /// 名前の後ろに付ける cwd を囲む ` (` と `)` の幅
 const CWD_OVERHEAD: usize = 3;
 /// [`ViewOptions::max_length`] の下限。
-/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。Nerd Font モードでは左端の後ろの空白を足して 3）、
-/// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の後ろの `app` のアイコンと前の空白
+/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。Nerd Font モードでは両端の内側の空白を足して 4）、
+/// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の前の `app` のアイコンと前の空白
 /// （Nerd Font モードで 2）、アイコンの後ろの空白（[`ViewOptions::nerd_font_icon_padding`] で 1）を足した幅。
-/// 最も広いのは Nerd Font モードで絵文字以外のアイコン（1 + 3）を選び、アイコンの後ろに空白を置くとき。
+/// 最も広いのは Nerd Font モードで絵文字以外のアイコン（1 + 4）を選び、アイコンの後ろに空白を置くとき。
 /// 設定ごとに下限を変えると config の読み込みが設定の順番に依存するので、最も広い場合に合わせている。
 /// Nerd Font の状態アイコンの後ろの空白は、進捗がないときだけ付けるので、進捗の最大幅を超えない。
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
-/// - アイコンと進捗だけで上限を超えることがある（例：Nerd Font モードのバッジ + ` 100%` で 9）
+/// - アイコンと進捗だけで上限を超えることがある（例：Nerd Font モードのバッジ + ` 100%` で 10）
 /// - 上限に収めるために、名前が [`MIN_NAME_WIDTH`] より短く切り詰められて見分けられなくなる
-pub const MIN_MAX_LENGTH: usize = 17;
+pub const MIN_MAX_LENGTH: usize = 18;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Role {
     /// 余白や区切り
     Plain,
-    /// 名前の後ろの `app` のアイコン（Nerd Font モード）
+    /// 名前の前の `app` のアイコン（Nerd Font モード）
     App,
     /// 状態アイコンと進捗。状態の色で塗る。
     State(AgentState),
@@ -148,14 +154,14 @@ enum BadgeEnds {
 }
 
 impl BadgeEnds {
-    /// 両端の文字と、左端の後ろの空白（[`BadgeEnds::inner_pad`]）の幅の合計
+    /// 両端の文字と、その内側の空白（[`BadgeEnds::inner_pad`]）の幅の合計
     fn width(self) -> usize {
-        2 + usize::from(self.inner_pad())
+        2 + 2 * usize::from(self.inner_pad())
     }
 
-    /// 左端とアイコンの間に、塗った空白を置くか。
-    /// Nerd Font の端の文字は前景色で描くのでアイコンとの間に余白がなく、詰まって見えるため置く。
-    /// 空白の端はそれ自体が余白なので置かない（置くと左右の余白の釣り合いが悪くなる）。
+    /// 両端の文字の内側（左端の後ろと右端の手前）に、塗った空白を置くか。
+    /// Nerd Font の端の文字は前景色で描くので中の文字との間に余白がなく、詰まって見えるため置く。
+    /// 空白の端はそれ自体が余白なので置かない（置くと余白が広すぎる）。
     fn inner_pad(self) -> bool {
         matches!(self, BadgeEnds::Glyph(_))
     }
@@ -169,17 +175,22 @@ impl BadgeEnds {
         }
     }
 
-    /// (左端, 右端) の Span
-    fn spans(self, state: AgentState) -> (Span, Span) {
+    /// (左端, 右端) の Span。内側の空白（[`BadgeEnds::inner_pad`]）も含める。
+    /// 右端は名前を入れたり強調したりすると後ろに移るので、内側の空白も一緒に移す。
+    fn spans(self, state: AgentState) -> (Vec<Span>, Vec<Span>) {
         let role = Role::BadgeEnd(state);
         match self {
             BadgeEnds::Space => {
                 let space = Span::new(" ", role).with_fill(Fill::State(state));
-                (space.clone(), space)
+                (vec![space.clone()], vec![space])
             }
             BadgeEnds::Glyph(shape) => {
                 let (left, right) = shape.glyphs();
-                (Span::new(left, role), Span::new(right, role))
+                let pad = Span::new(" ", Role::State(state)).with_fill(Fill::State(state));
+                (
+                    vec![Span::new(left, role), pad.clone()],
+                    vec![pad, Span::new(right, role)],
+                )
             }
         }
     }
@@ -203,7 +214,7 @@ struct Item {
     /// `42%` の形
     progress: Option<String>,
     name: String,
-    /// 名前の後ろに付ける `app` のアイコン（Nerd Font モードで、対応するアイコンがあるときだけ）
+    /// 名前の前に付ける `app` のアイコン（Nerd Font モードで、対応するアイコンがあるときだけ）
     app_icon: Option<&'static str>,
     /// カレントディレクトリの末尾のディレクトリ名（`show_cwd` が false なら None）
     cwd: Option<String>,
@@ -256,7 +267,7 @@ impl Item {
         }
     }
 
-    /// アイコンと進捗、バッジの両端と左端の後ろの空白の幅（常に表示する部分）。
+    /// アイコンと進捗、バッジの両端とその内側の空白の幅（常に表示する部分）。
     /// 名前を入れたり強調したりするとバッジの右端が後ろに移るが、幅は同じなのでここに含める。
     fn head_width(&self) -> usize {
         self.icon.width()
@@ -272,12 +283,23 @@ impl Item {
         self.icon_padding && self.nerd_icon && self.progress.is_none()
     }
 
-    /// 名前に付く部分（前の空白と、後ろの `app` のアイコンとその前の空白、
-    /// [`Item::icon_padding`] なら後ろの空白も）の幅。名前と一緒に表示し、一緒に省く
+    /// 名前に付く部分（前の空白と、前の `app` のアイコンとその前の空白、
+    /// [`Item::icon_padding`] ならアイコンの後ろの空白も）の幅。名前と一緒に表示し、一緒に省く
     fn name_overhead(&self) -> usize {
         1 + self
             .app_icon
             .map_or(0, |i| 1 + i.width() + usize::from(self.icon_padding))
+    }
+
+    /// 名前（と cwd）と msg の間の区切り。
+    /// 名前までをバッジにする（強調しない）ときは、バッジの右端が境目になるので空白 1 つにする。
+    /// それ以外（名前と msg が同じ背景で続く）は `: ` にする。強調すると幅が 1 広がる。
+    fn msg_separator(&self) -> &'static str {
+        if self.badge_name && !self.highlight {
+            " "
+        } else {
+            ": "
+        }
     }
 
     /// 各部分の幅の上限（名前は常に Some）。`max_length` を指定していれば、1 エージェント分がその幅に収まるようにする。
@@ -294,13 +316,14 @@ impl Item {
                 msg,
             };
         };
-        // 名前（と cwd・msg）に使える幅。名前の前の空白と後ろの app のアイコンを除く
+        // 名前（と cwd・msg）に使える幅。名前の前の空白と app のアイコンを除く
         let room = max_length.saturating_sub(self.head_width() + self.name_overhead());
         let cwd_total = cwd.map_or(0, |c| c + CWD_OVERHEAD);
         let fits = |width: usize, room: usize, min: usize| width <= room || room >= min;
 
         if let Some(msg) = msg
-            && let Some(msg_room) = room.checked_sub(name + cwd_total + MSG_OVERHEAD)
+            && let Some(msg_room) =
+                room.checked_sub(name + cwd_total + self.msg_separator().width())
             && fits(msg, msg_room, MIN_MSG_WIDTH)
         {
             return Widths {
@@ -328,23 +351,22 @@ impl Item {
 
     /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
     ///
-    /// 1 エージェント分を `空白 アイコン 進捗` / ` 名前 <app> (cwd)` / `: msg` の 3 つに分け、
-    /// 先頭から続けてバッジに入れる（塗る）。バッジの右端は、最初に入れない部分の手前に置く。
-    /// - 左端の後ろの空白（[`BadgeEnds::inner_pad`]）とアイコンと進捗：端の文字があるか、強調するときに入れる
+    /// 1 エージェント分を `アイコン 進捗` / ` <app> 名前 (cwd)` / `: msg` の 3 つに分け、
+    /// 先頭から続けてバッジに入れる（塗る）。バッジの右端（と内側の空白。[`BadgeEnds::inner_pad`]）は、
+    /// 最初に入れない部分の手前に置く。
+    /// - アイコンと進捗：端の文字があるか、強調するときに入れる
     /// - 名前（と `app` のアイコン・cwd）：[`Item::badge_name`] か、強調するときに入れる
     /// - msg：強調するときだけ入れる
     ///
     /// 名前を省いたときは名前の部分が空になるので、右端はアイコンと進捗の直後に来る。
-    /// 絵文字アイコン（端の文字なし）は左端の後ろの空白も付けないが、強調するときは全体を塗る。
+    /// 絵文字アイコン（端の文字なし）は端の内側の空白も付けないが、強調するときは全体を塗る。
     fn spans(&self, widths: Widths) -> Vec<Span> {
         let state = Fill::State(self.state);
-        let (left, mut right) = self.ends.map(|e| e.spans(self.state)).unzip();
+        let (left, mut right) = self
+            .ends
+            .map_or_else(Default::default, |e| e.spans(self.state));
 
-        let mut head = vec![];
-        if self.ends.is_some_and(BadgeEnds::inner_pad) {
-            head.push(Span::new(" ", Role::State(self.state)));
-        }
-        head.push(Span::new(self.icon, Role::State(self.state)));
+        let mut head = vec![Span::new(self.icon, Role::State(self.state))];
         if let Some(progress) = &self.progress {
             head.push(Span::new(format!(" {progress}"), Role::State(self.state)));
         }
@@ -354,8 +376,7 @@ impl Item {
         let mut label = vec![];
         let mut msg = vec![];
         if let Some(width) = widths.name {
-            label.push(Span::new(" ", Role::Plain));
-            label.push(Span::new(truncate(&self.name, width), Role::Name));
+            // app のアイコンは名前の前に置く（右隣に必ず名前の前の空白が来る。モジュールの説明を参照）
             if let Some(icon) = self.app_icon {
                 label.push(Span::new(" ", Role::Plain));
                 label.push(Span::new(icon, Role::App));
@@ -363,13 +384,15 @@ impl Item {
                     label.push(Span::new(" ", Role::Plain));
                 }
             }
+            label.push(Span::new(" ", Role::Plain));
+            label.push(Span::new(truncate(&self.name, width), Role::Name));
             if let (Some(text), Some(width)) = (&self.cwd, widths.cwd) {
                 label.push(Span::new(" (", Role::Plain));
                 label.push(Span::new(truncate(text, width), Role::Cwd));
                 label.push(Span::new(")", Role::Plain));
             }
             if let (Some(text), Some(width)) = (&self.msg, widths.msg) {
-                msg.push(Span::new(": ", Role::Plain));
+                msg.push(Span::new(self.msg_separator(), Role::Plain));
                 msg.push(Span::new(truncate(text, width), Role::Msg));
             }
         }
@@ -379,17 +402,18 @@ impl Item {
             (label, self.badge_name || self.highlight),
             (msg, self.highlight),
         ];
-        let mut spans: Vec<Span> = left.into_iter().collect();
+        let mut spans = left;
         for (part, in_badge) in parts {
             if in_badge {
                 spans.extend(part.into_iter().map(|s| s.with_fill(state)));
             } else {
                 // バッジに入れる部分は先頭から続いているので、最初に入れない部分の手前で閉じる
-                spans.extend(right.take());
+                // （append で right は空になるので、閉じるのは 1 回だけ）
+                spans.append(&mut right);
                 spans.extend(part);
             }
         }
-        spans.extend(right);
+        spans.append(&mut right);
         spans
     }
 }
@@ -465,7 +489,13 @@ fn plan(items: &[Item], cols: usize, sep_width: usize, max_length: Option<usize>
     let cwds_overhead = CWD_OVERHEAD * cwds.len();
     let cwds_total = cwds.iter().sum::<usize>() + cwds_overhead;
     let msgs = shown(&caps, |w| w.msg);
-    let msgs_overhead = MSG_OVERHEAD * msgs.len();
+    // 区切り（Item::msg_separator）の幅はエージェントごとに違うので、msg を表示するものだけ足す
+    let msgs_overhead = items
+        .iter()
+        .zip(&caps)
+        .filter(|(_, cap)| cap.msg.is_some())
+        .map(|(item, _)| item.msg_separator().width())
+        .sum::<usize>();
 
     if let Some(room) = cols.checked_sub(fixed + names_total + cwds_total + msgs_overhead)
         && let Some(msgs) = fit(&msgs, room, MIN_MSG_WIDTH)
@@ -631,14 +661,14 @@ mod tests {
     #[test]
     fn shows_icon_name_and_msg() {
         let a = with_msg(agent(1, AgentState::Working), "Running tests");
-        assert_eq!(plain(&[a], 80), " [↻] claude: Running tests");
+        assert_eq!(plain(&[a], 80), " [↻ claude] Running tests");
     }
 
     #[test]
     fn shows_progress_after_icon() {
         let mut a = agent(1, AgentState::Working);
         a.progress = Some(42);
-        assert_eq!(plain(&[a], 80), " [↻ 42%] claude");
+        assert_eq!(plain(&[a], 80), " [↻ 42% claude]");
     }
 
     fn icons(icons: IconStyle) -> ViewOptions {
@@ -661,8 +691,8 @@ mod tests {
         let emoji = icons(IconStyle::Emoji);
         for (state, symbol, letter, emoji_icon) in cases {
             let a = [agent(1, state)];
-            assert_eq!(plain(&a, 80), format!(" [{symbol}] claude"));
-            assert_eq!(plain_with(&a, 80, &alphabet), format!(" [{letter}] claude"));
+            assert_eq!(plain(&a, 80), format!(" [{symbol} claude]"));
+            assert_eq!(plain_with(&a, 80, &alphabet), format!(" [{letter} claude]"));
             assert_eq!(plain_with(&a, 80, &emoji), format!(" {emoji_icon} claude"));
         }
     }
@@ -700,22 +730,22 @@ mod tests {
         let mut a = agent(7, AgentState::Idle);
         a.title = Some("my-project".to_owned());
         a.tab_name = Some("work".to_owned());
-        assert_eq!(plain(&[a.clone()], 80), " [⋯] my-project");
+        assert_eq!(plain(&[a.clone()], 80), " [⋯ my-project]");
         a.title = Some("  ".to_owned());
-        assert_eq!(plain(&[a.clone()], 80), " [⋯] work");
+        assert_eq!(plain(&[a.clone()], 80), " [⋯ work]");
         a.tab_name = None;
-        assert_eq!(plain(&[a.clone()], 80), " [⋯] claude");
+        assert_eq!(plain(&[a.clone()], 80), " [⋯ claude]");
         a.app = None;
-        assert_eq!(plain(&[a], 80), " [⋯] #7");
+        assert_eq!(plain(&[a], 80), " [⋯ #7]");
     }
 
     #[test]
     fn tab_name_is_cleaned_and_skipped_when_empty() {
         let mut a = agent(7, AgentState::Idle);
         a.tab_name = Some(" \t\n".to_owned());
-        assert_eq!(plain(&[a.clone()], 80), " [⋯] claude");
+        assert_eq!(plain(&[a.clone()], 80), " [⋯ claude]");
         a.tab_name = Some("my\ntab".to_owned());
-        assert_eq!(plain(&[a], 80), " [⋯] my tab");
+        assert_eq!(plain(&[a], 80), " [⋯ my tab]");
     }
 
     #[test]
@@ -725,14 +755,11 @@ mod tests {
             ..Default::default()
         };
         let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
-        assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " [⋯] #7: waiting");
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " [⋯ #7] waiting");
         a.tab_name = Some("work".to_owned());
-        assert_eq!(
-            plain_with(&[a.clone()], 80, &hide_app),
-            " [⋯] work: waiting"
-        );
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " [⋯ work] waiting");
         a.title = Some("my-project".to_owned());
-        assert_eq!(plain_with(&[a], 80, &hide_app), " [⋯] my-project: waiting");
+        assert_eq!(plain_with(&[a], 80, &hide_app), " [⋯ my-project] waiting");
     }
 
     #[test]
@@ -748,12 +775,12 @@ mod tests {
         let agents = [b, c, a];
 
         // 同じタブに複数いると同じ名前が並ぶ（既知の制限）
-        assert_eq!(plain(&agents, 80), " [⋯] z  [⋯] z  [⋯] a");
+        assert_eq!(plain(&agents, 80), " [⋯ z]  [⋯ z]  [⋯ a]");
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
             ..Default::default()
         };
-        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯] z  [⋯] a");
+        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ z]  [⋯ a]");
     }
 
     #[test]
@@ -769,14 +796,14 @@ mod tests {
             show_app: false,
             ..Default::default()
         };
-        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯] #1");
+        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ #1]");
         let hide_app = ViewOptions {
             show_app: false,
             ..Default::default()
         };
         assert_eq!(
             plain_with(&agents, 80, &hide_app),
-            " [⋯] #1  [⋯] #2  [⋯] #3"
+            " [⋯ #1]  [⋯ #2]  [⋯ #3]"
         );
     }
 
@@ -797,24 +824,24 @@ mod tests {
         );
         assert_eq!(
             plain_with(std::slice::from_ref(&a), 80, &show_cwd()),
-            " [↻] claude (issue-21): Running tests"
+            " [↻ claude (issue-21)] Running tests"
         );
         // 既定では表示しない
-        assert_eq!(plain(&[a], 80), " [↻] claude: Running tests");
+        assert_eq!(plain(&[a], 80), " [↻ claude] Running tests");
     }
 
     #[test]
     fn cwd_without_last_directory_or_unknown() {
         let options = show_cwd();
         let root = with_cwd(agent(1, AgentState::Idle), "/");
-        assert_eq!(plain_with(&[root], 80, &options), " [⋯] claude (/)");
+        assert_eq!(plain_with(&[root], 80, &options), " [⋯ claude (/)]");
         let trailing = with_cwd(agent(1, AgentState::Idle), "/repo/main/");
-        assert_eq!(plain_with(&[trailing], 80, &options), " [⋯] claude (main)");
+        assert_eq!(plain_with(&[trailing], 80, &options), " [⋯ claude (main)]");
         let control = with_cwd(agent(1, AgentState::Idle), "/repo/a\nb");
-        assert_eq!(plain_with(&[control], 80, &options), " [⋯] claude (a b)");
+        assert_eq!(plain_with(&[control], 80, &options), " [⋯ claude (a b)]");
         // 取得できていなければ、括弧ごと表示しない
         let unknown = agent(1, AgentState::Idle);
-        assert_eq!(plain_with(&[unknown], 80, &options), " [⋯] claude");
+        assert_eq!(plain_with(&[unknown], 80, &options), " [⋯ claude]");
     }
 
     #[test]
@@ -823,7 +850,7 @@ mod tests {
         let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
         assert_eq!(
             plain_with(&[a, b], 80, &show_cwd()),
-            " [↻] claude: Running tests  [✓] claude (main)"
+            " [↻ claude] Running tests  [✓ claude (main)]"
         );
     }
 
@@ -839,20 +866,20 @@ mod tests {
         let line = |cols| plain_with(&agents, cols, &options);
 
         assert_eq!(
-            line(62),
-            " [↻] claude (feature-branch): Running tests  [✓] claude (main)"
+            line(61),
+            " [↻ claude (feature-branch)] Running tests  [✓ claude (main)]"
         );
         // 1. msg を切り詰める（MIN_MSG_WIDTH まで）
         assert_eq!(
-            line(55),
-            " [↻] claude (feature-branch): Runni~  [✓] claude (main)"
+            line(54),
+            " [↻ claude (feature-branch)] Runni~  [✓ claude (main)]"
         );
         // 2. msg を省き、cwd を均等に切り詰める
-        assert_eq!(line(54), " [↻] claude (feature-branch)  [✓] claude (main)");
-        assert_eq!(line(44), " [↻] claude (feature-br~)  [✓] claude (main)");
-        assert_eq!(line(37), " [↻] claude (fea~)  [✓] claude (main)");
+        assert_eq!(line(53), " [↻ claude (feature-branch)]  [✓ claude (main)]");
+        assert_eq!(line(44), " [↻ claude (feature-br~)]  [✓ claude (main)]");
+        assert_eq!(line(37), " [↻ claude (fea~)]  [✓ claude (main)]");
         // 3. cwd を省き、名前を切り詰める
-        assert_eq!(line(36), " [↻] claude  [✓] claude");
+        assert_eq!(line(36), " [↻ claude]  [✓ claude]");
         // 4. アイコンだけにする
         assert_eq!(line(16), " [↻]  [✓]");
     }
@@ -860,7 +887,7 @@ mod tests {
     #[test]
     fn control_characters_are_replaced() {
         let a = with_msg(agent(1, AgentState::Done), "line1\nline2\x1b[31m");
-        assert_eq!(plain(&[a], 80), " [✓] claude: line1 line2 [31m");
+        assert_eq!(plain(&[a], 80), " [✓ claude] line1 line2 [31m");
     }
 
     #[test]
@@ -872,7 +899,7 @@ mod tests {
         b.tab = 1;
         let mut c = agent(9, AgentState::Idle);
         c.app = Some("c".to_owned());
-        assert_eq!(plain(&[b, c, a], 80), " [⋯] a  [⋯] c  [⋯] b");
+        assert_eq!(plain(&[b, c, a], 80), " [⋯ a]  [⋯ c]  [⋯ b]");
     }
 
     /// (タブ, ペイン) の順で a, b, c, d, e になるエージェント。状態は `states` の順に割り当てる
@@ -897,7 +924,7 @@ mod tests {
     fn blocked_is_not_moved_by_default() {
         use AgentState::*;
         let agents = named_agents([Idle, Blocked, Working, Blocked, Error]);
-        assert_eq!(plain(&agents, 80), " [⋯] a  [!] b  [↻] c  [!] d  [✗] e");
+        assert_eq!(plain(&agents, 80), " [⋯ a]  [! b]  [↻ c]  [! d]  [✗ e]");
     }
 
     #[test]
@@ -910,18 +937,18 @@ mod tests {
         let agents = named_agents([Idle, Blocked, Working, Blocked, Error]);
         assert_eq!(
             plain_with(&agents, 80, &blocked_first),
-            " [!] b  [!] d  [⋯] a  [↻] c  [✗] e"
+            " [! b]  [! d]  [⋯ a]  [↻ c]  [✗ e]"
         );
         // Blocked が解消されると元の位置に戻る
         let agents = named_agents([Idle, Working, Working, Blocked, Error]);
         assert_eq!(
             plain_with(&agents, 80, &blocked_first),
-            " [!] d  [⋯] a  [↻] b  [↻] c  [✗] e"
+            " [! d]  [⋯ a]  [↻ b]  [↻ c]  [✗ e]"
         );
         let agents = named_agents([Idle, Working, Working, Done, Error]);
         assert_eq!(
             plain_with(&agents, 80, &blocked_first),
-            " [⋯] a  [↻] b  [↻] c  [✓] d  [✗] e"
+            " [⋯ a]  [↻ b]  [↻ c]  [✓ d]  [✗ e]"
         );
     }
 
@@ -949,24 +976,24 @@ mod tests {
             apps: Some(vec!["claude".to_owned()]),
             ..Default::default()
         };
-        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯] claude");
+        assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ claude]");
         // 絞り込まなければ、app のないエージェントも表示する
-        assert_eq!(plain(&agents, 80), " [⋯] claude  [⋯] codex  [⋯] #3");
+        assert_eq!(plain(&agents, 80), " [⋯ claude]  [⋯ codex]  [⋯ #3]");
     }
 
     #[test]
     fn msgs_are_shortened_evenly() {
         let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
         let b = with_msg(agent(2, AgentState::Blocked), "short");
-        // 全体：" [↻] claude: " (13) + 20 + "  " (2) + "[!] claude: " (12) + 5 = 52
+        // 全体：" [↻ claude] " (12) + 20 + "  " (2) + "[! claude] " (11) + 5 = 50
         assert_eq!(
-            plain(&[a.clone(), b.clone()], 52),
-            " [↻] claude: abcdefghijklmnopqrst  [!] claude: short"
+            plain(&[a.clone(), b.clone()], 50),
+            " [↻ claude] abcdefghijklmnopqrst  [! claude] short"
         );
         // 短い msg はそのまま、長い msg が余りを使う
         assert_eq!(
-            plain(&[a, b], 44),
-            " [↻] claude: abcdefghijk~  [!] claude: short"
+            plain(&[a, b], 42),
+            " [↻ claude] abcdefghijk~  [! claude] short"
         );
     }
 
@@ -975,7 +1002,7 @@ mod tests {
         let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
         let b = with_msg(agent(2, AgentState::Blocked), "short");
         // msg に回せる幅が MIN_MSG_WIDTH 未満になる
-        assert_eq!(plain(&[a, b], 36), " [↻] claude  [!] claude");
+        assert_eq!(plain(&[a, b], 35), " [↻ claude]  [! claude]");
     }
 
     #[test]
@@ -986,7 +1013,7 @@ mod tests {
         // 名前に回せる幅は 13：短い "claude" に 6、残り 7 を長い方へ
         assert_eq!(
             plain(&[a.clone(), b.clone()], 24),
-            " [↻] long-p~  [✓] claude"
+            " [↻ long-p~]  [✓ claude]"
         );
         assert_eq!(plain(&[a, b], 16), " [↻]  [✓]");
     }
@@ -1000,10 +1027,10 @@ mod tests {
     #[test]
     fn wide_characters_are_counted_by_width() {
         let a = [with_msg(agent(1, AgentState::Blocked), "許可してください")];
-        // " [!] claude: " (13) + 16 = 29
-        assert_eq!(plain(&a, 29), " [!] claude: 許可してください");
+        // " [! claude] " (12) + 16 = 28
+        assert_eq!(plain(&a, 28), " [! claude] 許可してください");
         // msg の幅 8：全角 3 文字（6）+ "~"、残り 1 桁には全角が入らない
-        assert_eq!(plain(&a, 21), " [!] claude: 許可し~");
+        assert_eq!(plain(&a, 20), " [! claude] 許可し~");
     }
 
     /// 幅を総当たりで確かめるための、進捗・app のアイコン・cwd・msg・全角文字を含むエージェント
@@ -1098,24 +1125,24 @@ mod tests {
     fn max_length_truncates_msg_first() {
         let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
         let b = with_msg(agent(2, AgentState::Blocked), "short");
-        // "[↻] claude: " (12) + msg 10 = 22。短い方はそのまま
+        // "[↻ claude] " (11) + msg 11 = 22。短い方はそのまま
         assert_eq!(
             plain_with(&[a, b], 80, &max_length(22)),
-            " [↻] claude: abcdefghi~  [!] claude: short"
+            " [↻ claude] abcdefghij~  [! claude] short"
         );
     }
 
     #[test]
     fn max_length_drops_msg_then_truncates_name() {
         let mut a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
-        // msg に回せる幅が 4（MIN_MSG_WIDTH 未満）なので省く
-        assert_eq!(plain_with(&[a.clone()], 80, &max_length(16)), " [↻] claude");
+        // msg に回せる幅が 5（MIN_MSG_WIDTH 未満）なので省く
+        assert_eq!(plain_with(&[a.clone()], 80, &max_length(16)), " [↻ claude]");
         // 収まる msg なら MIN_MSG_WIDTH 未満の幅でも表示する
         let short = with_msg(agent(1, AgentState::Working), "ok");
-        assert_eq!(plain_with(&[short], 80, &max_length(16)), " [↻] claude: ok");
+        assert_eq!(plain_with(&[short], 80, &max_length(16)), " [↻ claude] ok");
 
         a.title = Some("long-project-name".to_owned());
-        assert_eq!(plain_with(&[a], 80, &max_length(16)), " [↻] long-projec~");
+        assert_eq!(plain_with(&[a], 80, &max_length(16)), " [↻ long-projec~]");
     }
 
     #[test]
@@ -1125,15 +1152,15 @@ mod tests {
         a.progress = Some(100);
         assert_eq!(
             plain_with(&[a.clone()], 80, &max_length(MIN_MAX_LENGTH)),
-            " [↻ 100%] my-proj~"
+            " [↻ 100% my-proje~]"
         );
         let emoji = ViewOptions {
             icons: IconStyle::Emoji,
             ..max_length(MIN_MAX_LENGTH)
         };
         // 絵文字はバッジの端がない分、名前に回せる幅が広い
-        assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-proje~");
-        // Nerd Font モードでは、バッジの左端の後ろの空白の 1 と、名前の後ろの app のアイコンと前の空白の 2 も数える
+        assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-project");
+        // Nerd Font モードでは、バッジの両端の内側の空白の 2 と、名前の前の app のアイコンと前の空白の 2 も数える
         a.app = Some("claude-code".to_owned());
         let nerd = ViewOptions {
             nerd_font: true,
@@ -1142,7 +1169,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a.clone()], 80, &nerd),
-            " [ \u{f013} 100%] my-p~ \u{ec82}"
+            " [ \u{f013} 100% \u{ec82} my-p~ ]"
         );
         // アイコンの後ろの空白も数える（名前は MIN_NAME_WIDTH まで縮む）
         let padded = ViewOptions {
@@ -1151,7 +1178,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a], 80, &padded),
-            " [ \u{f013} 100%] my-~ \u{ec82} "
+            " [ \u{f013} 100% \u{ec82}  my-~ ]"
         );
     }
 
@@ -1160,22 +1187,22 @@ mod tests {
         let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
         let b = with_msg(agent(2, AgentState::Blocked), "short");
         let options = max_length(22);
-        // 上限で切り詰めた幅（msg 10 と 5）を、行の幅に合わせてさらに均等に縮める
+        // 上限で切り詰めた幅（msg 11 と 5）を、行の幅に合わせてさらに均等に縮める
         assert_eq!(
-            plain_with(&[a.clone(), b.clone()], 40, &options),
-            " [↻] claude: abcdefg~  [!] claude: short"
+            plain_with(&[a.clone(), b.clone()], 38, &options),
+            " [↻ claude] abcdefg~  [! claude] short"
         );
-        assert_eq!(plain_with(&[a, b], 24, &options), " [↻] claude  [!] claude");
+        assert_eq!(plain_with(&[a, b], 24, &options), " [↻ claude]  [! claude]");
     }
 
     #[test]
     fn max_length_defaults_to_50_and_none_is_unlimited() {
         let msg = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         let a = with_msg(agent(1, AgentState::Working), msg);
-        // "[↻] claude: " (12) + msg 38 = 50
+        // "[↻ claude] " (11) + msg 39 = 50
         assert_eq!(
             plain(std::slice::from_ref(&a), 80),
-            " [↻] claude: abcdefghijklmnopqrstuvwxyzABCDEFGHIJK~"
+            " [↻ claude] abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL~"
         );
         let unlimited = ViewOptions {
             max_length: None,
@@ -1183,14 +1210,14 @@ mod tests {
         };
         assert_eq!(
             plain_with(&[a], 80, &unlimited),
-            format!(" [↻] claude: {msg}")
+            format!(" [↻ claude] {msg}")
         );
     }
 
     #[test]
     fn max_length_leaves_short_agents_unchanged() {
         let a = with_msg(agent(1, AgentState::Done), "ok");
-        assert_eq!(plain_with(&[a], 80, &max_length(40)), " [✓] claude: ok");
+        assert_eq!(plain_with(&[a], 80, &max_length(40)), " [✓ claude] ok");
     }
 
     #[test]
@@ -1236,20 +1263,20 @@ mod tests {
         );
         let line = |max| plain_with(std::slice::from_ref(&a), 80, &max_length_with_cwd(max));
 
-        assert_eq!(line(42), " [↻] claude (feature-branch): Running tests");
+        assert_eq!(line(41), " [↻ claude (feature-branch)] Running tests");
         // msg を切り詰める（MIN_MSG_WIDTH まで）
-        assert_eq!(line(37), " [↻] claude (feature-branch): Running~");
+        assert_eq!(line(36), " [↻ claude (feature-branch)] Running~");
         // msg を省き、cwd を切り詰める（MIN_CWD_WIDTH まで）
-        assert_eq!(line(32), " [↻] claude (feature-branch)");
-        assert_eq!(line(22), " [↻] claude (feature-~)");
-        assert_eq!(line(17), " [↻] claude (fea~)");
+        assert_eq!(line(32), " [↻ claude (feature-branch)]");
+        assert_eq!(line(22), " [↻ claude (feature-~)]");
+        assert_eq!(line(17), " [↻ claude (fea~)]");
         // cwd も省き、名前を切り詰める
-        assert_eq!(line(16), " [↻] claude");
+        assert_eq!(line(16), " [↻ claude]");
         let mut long = a.clone();
         long.title = Some("long-project-name".to_owned());
         assert_eq!(
             plain_with(&[long], 80, &max_length_with_cwd(16)),
-            " [↻] long-projec~"
+            " [↻ long-projec~]"
         );
     }
 
@@ -1261,20 +1288,18 @@ mod tests {
         // 上限で切り詰めた cwd（9 と 4）を、行の幅に合わせてさらに均等に縮める
         assert_eq!(
             plain_with(&[a.clone(), b.clone()], 80, &options),
-            " [↻] claude (feature-~)  [✓] claude (main)"
+            " [↻ claude (feature-~)]  [✓ claude (main)]"
         );
         assert_eq!(
             plain_with(&[a, b], 40, &options),
-            " [↻] claude (featur~)  [✓] claude (main)"
+            " [↻ claude (featur~)]  [✓ claude (main)]"
         );
     }
 
     #[test]
     fn never_exceeds_max_length() {
         let agents = mixed_agents();
-        // badge_name は端の文字を移すだけで幅を変えない（badge_name_only_moves_badge_end で確かめる）ので、
-        // 時間のかかるこのテストでは組み合わせから外す
-        for base in option_combinations().into_iter().filter(|o| !o.badge_name) {
+        for base in option_combinations() {
             for max in MIN_MAX_LENGTH..40 {
                 let options = ViewOptions {
                     max_length: Some(max),
@@ -1307,16 +1332,16 @@ mod tests {
         let mut b = agent(2, AgentState::Done);
         b.app = Some("codex".to_owned());
         let agents = [a, b];
-        // app のアイコンは名前の後ろ。対応するアイコンのない app（codex）には付けない。
+        // app のアイコンは名前の前。対応するアイコンのない app（codex）には付けない。
         // エージェント同士の区切りは Nerd Font モードでも空白
         for shape in SHAPES {
             assert_eq!(
                 plain_with(&agents, 80, &nerd_font(shape)),
-                " [ \u{f013}] claude-code \u{ec82}: Running tests  [ \u{f00c}] codex",
+                " [ \u{f013} \u{ec82} claude-code ] Running tests  [ \u{f00c} codex ]",
                 "{shape:?}"
             );
         }
-        // cwd は app のアイコンの後ろ
+        // cwd は名前の後ろ
         let with_dir = [with_cwd(agents[0].clone(), "/repo/main")];
         let options = ViewOptions {
             show_cwd: true,
@@ -1324,7 +1349,16 @@ mod tests {
         };
         assert_eq!(
             plain_with(&with_dir, 80, &options),
-            " [ \u{f013}] claude-code \u{ec82} (main): Running tests"
+            " [ \u{f013} \u{ec82} claude-code (main) ] Running tests"
+        );
+        // バッジに名前を入れなくても、app のアイコンは名前の前（msg の前は `: `）
+        let no_badge_name = ViewOptions {
+            badge_name: false,
+            ..options
+        };
+        assert_eq!(
+            plain_with(&with_dir, 80, &no_badge_name),
+            " [ \u{f013} ] \u{ec82} claude-code (main): Running tests"
         );
         // Nerd Font モードでなければ、app のアイコンを付けない
         let symbol_only = ViewOptions {
@@ -1333,7 +1367,7 @@ mod tests {
         };
         assert_eq!(
             plain_with(&agents, 80, &symbol_only),
-            " [↻] claude-code: Running tests  [✓] codex"
+            " [↻ claude-code] Running tests  [✓ codex]"
         );
     }
 
@@ -1345,7 +1379,7 @@ mod tests {
             show_app: false,
             ..nerd_font(BadgeShape::Slash)
         };
-        assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186}] #7 \u{ec82}");
+        assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186} \u{ec82} #7 ]");
     }
 
     #[test]
@@ -1356,7 +1390,7 @@ mod tests {
             icons: IconStyle::Emoji,
             ..nerd_font(BadgeShape::Slash)
         };
-        assert_eq!(plain_with(&[a], 80, &options), " ✅ claude-code \u{ec82}");
+        assert_eq!(plain_with(&[a], 80, &options), " ✅ \u{ec82} claude-code");
     }
 
     #[test]
@@ -1370,27 +1404,27 @@ mod tests {
             max_length: None,
             ..nerd_font(BadgeShape::Slash)
         };
-        // 固定部分：" " (1) + "[ \u{f013}]" (4) + "  " (2) + "[ \u{f00c}]" (4) = 11
-        // 名前に付く部分：" " + " \u{ec82}" (3) と " " (1) = 4
-        // 名前に回せる幅は 27 - 11 - 4 = 12：短い "claude" に 6、残り 6 を長い方へ
+        // 固定部分：" " (1) + "[ \u{f013} ]" (5) + "  " (2) + "[ \u{f00c} ]" (5) = 13
+        // 名前に付く部分：" \u{ec82}" + " " (3) と " " (1) = 4
+        // 名前に回せる幅は 29 - 13 - 4 = 12：短い "claude" に 6、残り 6 を長い方へ
         assert_eq!(
-            plain_with(&agents, 27, &options),
-            " [ \u{f013}] long-~ \u{ec82}  [ \u{f00c}] claude"
+            plain_with(&agents, 29, &options),
+            " [ \u{f013} \u{ec82} long-~ ]  [ \u{f00c} claude ]"
         );
         // アイコンの後ろに空白を置くと、その分も数える
-        // 固定部分は 13（状態アイコンの後ろの空白 2）、名前に付く部分は 5（app のアイコンの後ろの空白 1）
+        // 固定部分は 15（状態アイコンの後ろの空白 2）、名前に付く部分は 5（app のアイコンの後ろの空白 1）
         let padded = ViewOptions {
             nerd_font_icon_padding: true,
             ..options.clone()
         };
         assert_eq!(
-            plain_with(&agents, 30, &padded),
-            " [ \u{f013} ] long-~ \u{ec82}   [ \u{f00c} ] claude"
+            plain_with(&agents, 32, &padded),
+            " [ \u{f013}  \u{ec82}  long-~ ]  [ \u{f00c}  claude ]"
         );
         // 状態アイコンだけにする。app のアイコンも名前と一緒に省く
         assert_eq!(
-            plain_with(&agents, 18, &options),
-            " [ \u{f013}]  [ \u{f00c}]"
+            plain_with(&agents, 20, &options),
+            " [ \u{f013} ]  [ \u{f00c} ]"
         );
     }
 
@@ -1410,16 +1444,16 @@ mod tests {
         // 進捗があれば、その前の空白が状態アイコンの右隣になるので足さない
         assert_eq!(
             plain_with(&agents, 80, &padded),
-            " [ \u{f071} ] claude-code \u{ec82} : Allow?  [ \u{f00c} 42%] claude-code \u{ec82}  (main)"
+            " [ \u{f071}  \u{ec82}  claude-code ] Allow?  [ \u{f00c} 42% \u{ec82}  claude-code (main) ]"
         );
-        // 強調しても幅は変わらない（状態アイコンと名前の間は空白 2 つ）
+        // 強調すると msg の前が `: ` になる（状態アイコンと app のアイコンの間は空白 2 つ）
         let highlighted = ViewOptions {
             highlight_attention: true,
             ..padded.clone()
         };
         assert_eq!(
             plain_with(&agents, 80, &highlighted),
-            " [ \u{f071}  claude-code \u{ec82} : Allow?]  [ \u{f00c} 42%] claude-code \u{ec82}  (main)"
+            " [ \u{f071}  \u{ec82}  claude-code: Allow? ]  [ \u{f00c} 42% \u{ec82}  claude-code (main) ]"
         );
         // Nerd Font のアイコンを使わなければ何も変わらない
         let symbol = ViewOptions {
@@ -1548,20 +1582,22 @@ mod tests {
     }
 
     #[test]
-    fn badge_fills_icon_and_progress() {
+    fn badge_without_name_fills_icon_and_progress() {
         let mut a = with_msg(agent(1, AgentState::Working), "Running");
         a.progress = Some(42);
         let a = [a];
-        assert_eq!(filled_runs(&a, 80, &ViewOptions::default()), [" ↻ 42% "]);
+        let options = without_badge_name(ViewOptions::default());
+        assert_eq!(plain_with(&a, 80, &options), " [↻ 42%] claude: Running");
+        assert_eq!(filled_runs(&a, 80, &options), [" ↻ 42% "]);
         // Nerd Font モードの端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
         for shape in SHAPES {
             assert_eq!(
-                filled_runs(&a, 80, &nerd_font(shape)),
-                [" \u{f013} 42%"],
+                filled_runs(&a, 80, &without_badge_name(nerd_font(shape))),
+                [" \u{f013} 42% "],
                 "{shape:?}"
             );
         }
-        assert!(filled_runs(&a, 80, &icons(IconStyle::Emoji)).is_empty());
+        assert!(filled_runs(&a, 80, &without_badge_name(icons(IconStyle::Emoji))).is_empty());
     }
 
     fn highlight(options: ViewOptions) -> ViewOptions {
@@ -1580,7 +1616,9 @@ mod tests {
                 a.msg = Some("Allow Bash?".to_owned());
             }
         }
-        let options = highlight(ViewOptions::default());
+        // 強調の範囲が分かりやすいよう、名前はバッジに入れない（入れるときは badge_name_with_highlight_attention）
+        let base = without_badge_name(ViewOptions::default());
+        let options = highlight(base.clone());
         let line = plain_with(&agents, 80, &options);
         assert_eq!(line, " [⋯] a  [! b: Allow Bash?]  [↻] c  [✓] d  [✗ e]");
         assert_eq!(
@@ -1588,10 +1626,10 @@ mod tests {
             [" ⋯ ", " ! b: Allow Bash? ", " ↻ ", " ✓ ", " ✗ e "]
         );
         // 端の文字を移すだけなので、強調しても幅は変わらない
-        assert_eq!(line.width(), plain(&agents, 80).width());
+        assert_eq!(line.width(), plain_with(&agents, 80, &base).width());
         // 既定では強調しない
         assert_eq!(
-            plain(&agents, 80),
+            plain_with(&agents, 80, &base),
             " [⋯] a  [!] b: Allow Bash?  [↻] c  [✓] d  [✗] e"
         );
     }
@@ -1610,12 +1648,12 @@ mod tests {
             let (left, right) = shape.glyphs();
             assert_eq!(
                 raw,
-                format!(" {left} \u{f071} claude-code \u{ec82}: Allow?{right}"),
+                format!(" {left} \u{f071} \u{ec82} claude-code: Allow? {right}"),
                 "{shape:?}"
             );
             assert_eq!(
                 filled_runs(&a, 80, &options),
-                [" \u{f071} claude-code \u{ec82}: Allow?"],
+                [" \u{f071} \u{ec82} claude-code: Allow? "],
                 "{shape:?}"
             );
         }
@@ -1635,9 +1673,9 @@ mod tests {
         assert_eq!(filled_runs(&agents, 80, &options), ["❌ claude: failed"]);
     }
 
-    fn badge_name(options: ViewOptions) -> ViewOptions {
+    fn without_badge_name(options: ViewOptions) -> ViewOptions {
         ViewOptions {
-            badge_name: true,
+            badge_name: false,
             ..options
         }
     }
@@ -1649,25 +1687,25 @@ mod tests {
         let mut b = agent(2, AgentState::Done);
         b.app = Some("codex".to_owned());
         let agents = [a, b];
-        let options = badge_name(ViewOptions::default());
-        let line = plain_with(&agents, 80, &options);
-        assert_eq!(line, " [↻ 42% claude]: Running tests  [✓ codex]");
+        // 既定で名前をバッジに入れる
+        let line = plain(&agents, 80);
+        // バッジの右端が名前と msg の境目になるので、msg の前は `: ` ではなく空白
+        assert_eq!(line, " [↻ 42% claude] Running tests  [✓ codex]");
         assert_eq!(
-            filled_runs(&agents, 80, &options),
+            filled_runs(&agents, 80, &ViewOptions::default()),
             [" ↻ 42% claude ", " ✓ codex "]
         );
-        // 端の文字を移すだけなので、幅は変わらない
-        assert_eq!(line.width(), plain(&agents, 80).width());
-        // 既定では名前をバッジに入れない
-        assert_eq!(
-            plain(&agents, 80),
-            " [↻ 42%] claude: Running tests  [✓] codex"
-        );
+        // badge_name が false なら、状態アイコンと進捗だけをバッジにし、msg の前は `: `
+        let without = without_badge_name(ViewOptions::default());
+        let line_without = plain_with(&agents, 80, &without);
+        assert_eq!(line_without, " [↻ 42%] claude: Running tests  [✓] codex");
+        // 違いは端の文字の位置と msg の前の区切りだけなので、区切りの差の 1 だけ狭い
+        assert_eq!(line.width() + 1, line_without.width());
     }
 
     #[test]
     fn badge_name_includes_cwd_and_follows_shortening() {
-        let options = badge_name(show_cwd());
+        let options = show_cwd();
         let a = with_msg(
             with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
             "Running tests",
@@ -1677,24 +1715,24 @@ mod tests {
         let line = |cols| plain_with(&agents, cols, &options);
 
         assert_eq!(
-            line(62),
-            " [↻ claude (feature-branch)]: Running tests  [✓ claude (main)]"
+            line(61),
+            " [↻ claude (feature-branch)] Running tests  [✓ claude (main)]"
         );
         assert_eq!(
-            filled_runs(&agents, 62, &options),
+            filled_runs(&agents, 61, &options),
             [" ↻ claude (feature-branch) ", " ✓ claude (main) "]
         );
         // 1. msg を切り詰める
         assert_eq!(
-            line(55),
-            " [↻ claude (feature-branch)]: Runni~  [✓ claude (main)]"
+            line(54),
+            " [↻ claude (feature-branch)] Runni~  [✓ claude (main)]"
         );
         // 2. msg を省き、cwd を切り詰める（~ もバッジの中）
-        assert_eq!(line(54), " [↻ claude (feature-branch)]  [✓ claude (main)]");
+        assert_eq!(line(53), " [↻ claude (feature-branch)]  [✓ claude (main)]");
         assert_eq!(line(37), " [↻ claude (fea~)]  [✓ claude (main)]");
         // 3. cwd を省き、名前を切り詰める
         assert_eq!(line(36), " [↻ claude]  [✓ claude]");
-        // 4. アイコンだけにすると、今のバッジの形に戻る
+        // 4. アイコンだけにすると、状態アイコンと進捗だけのバッジになる
         assert_eq!(line(16), " [↻]  [✓]");
         assert_eq!(filled_runs(&agents, 16, &options), [" ↻ ", " ✓ "]);
     }
@@ -1705,7 +1743,7 @@ mod tests {
         a.title = Some("long-project-name".to_owned());
         let b = agent(2, AgentState::Done);
         let agents = [a, b];
-        let options = badge_name(ViewOptions::default());
+        let options = ViewOptions::default();
         assert_eq!(
             plain_with(&agents, 24, &options),
             " [↻ long-p~]  [✓ claude]"
@@ -1716,16 +1754,22 @@ mod tests {
         );
         // 縮めたときも max_length で切り詰めたときも、端の文字を移すだけ
         let long = [agents[0].clone()];
-        assert_eq!(
-            plain_with(&long, 80, &badge_name(max_length(16))),
-            " [↻ long-projec~]"
-        );
+        assert_eq!(plain_with(&long, 80, &max_length(16)), " [↻ long-projec~]");
     }
 
     #[test]
-    fn badge_name_only_moves_badge_end() {
-        let agents = mixed_agents();
-        let strip = |line: String| line.replace(['[', ']'], "");
+    fn badge_name_only_moves_badge_end_without_msg() {
+        // msg があると区切り（Item::msg_separator）の幅も変わるので、msg のないエージェントで確かめる
+        let mut agents = mixed_agents();
+        for a in &mut agents {
+            a.msg = None;
+        }
+        // 右端と一緒に内側の空白（Nerd Font モード）も移るので、端の文字と空白を除いた中身と幅で比べる
+        let strip = |line: &str| -> String {
+            line.chars()
+                .filter(|&c| !matches!(c, '[' | ']' | ' '))
+                .collect()
+        };
         let max_lengths = [None, Some(MIN_MAX_LENGTH), Some(DEFAULT_MAX_LENGTH)];
         for base in option_combinations().into_iter().filter(|o| !o.badge_name) {
             for max_length in max_lengths {
@@ -1733,45 +1777,51 @@ mod tests {
                     max_length,
                     ..base.clone()
                 };
-                let options = badge_name(base.clone());
+                let options = ViewOptions {
+                    badge_name: true,
+                    ..base.clone()
+                };
                 for cols in 0..120 {
                     let with = plain_with(&agents, cols, &options);
                     let without = plain_with(&agents, cols, &base);
-                    assert_eq!(strip(with), strip(without), "{options:?} cols={cols}");
+                    let case = format!("{options:?} cols={cols}");
+                    assert_eq!(with.width(), without.width(), "{case}");
+                    assert_eq!(strip(&with), strip(&without), "{case}");
                 }
             }
         }
     }
 
     #[test]
-    fn badge_name_with_nerd_font_puts_app_icon_into_badge() {
+    fn badge_name_with_nerd_font_ends_badge_with_name() {
         let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
         a.app = Some("claude-code".to_owned());
         let a = [a];
-        let options = badge_name(nerd_font(BadgeShape::Round));
+        let options = nerd_font(BadgeShape::Round);
         let raw = |options: &ViewOptions| -> String {
             layout(&a, 80, options)
                 .into_iter()
                 .map(|s| s.text)
                 .collect()
         };
+        // app のアイコンは名前の前なので、バッジの右端の手前は必ず名前（アイコンで終わらない）
         assert_eq!(
             raw(&options),
-            " \u{e0b6} \u{f013} claude-code \u{ec82}\u{e0b4}: Running tests"
+            " \u{e0b6} \u{f013} \u{ec82} claude-code \u{e0b4} Running tests"
         );
-        // 左端の後ろの空白から app のアイコンまでを塗る
+        // 両端の内側の空白も含めて、左端と右端の間を塗る
         assert_eq!(
             filled_runs(&a, 80, &options),
-            [" \u{f013} claude-code \u{ec82}"]
+            [" \u{f013} \u{ec82} claude-code "]
         );
-        // app のアイコンの後ろの空白もバッジに入る
+        // アイコンの後ろの空白もバッジの中に入る
         let padded = ViewOptions {
             nerd_font_icon_padding: true,
             ..options
         };
         assert_eq!(
             raw(&padded),
-            " \u{e0b6} \u{f013}  claude-code \u{ec82} \u{e0b4}: Running tests"
+            " \u{e0b6} \u{f013}  \u{ec82}  claude-code \u{e0b4} Running tests"
         );
     }
 
@@ -1783,14 +1833,13 @@ mod tests {
         ];
         let emoji = icons(IconStyle::Emoji);
         assert_eq!(
-            plain_with(&agents, 80, &badge_name(emoji.clone())),
-            plain_with(&agents, 80, &emoji)
+            plain_with(&agents, 80, &emoji),
+            plain_with(&agents, 80, &without_badge_name(emoji.clone()))
         );
-        assert!(filled_runs(&agents, 80, &badge_name(emoji.clone())).is_empty());
-        // 強調するときは、今と同じく強調したエージェントだけ全体を塗る
-        let highlighted = highlight(emoji);
+        assert!(filled_runs(&agents, 80, &emoji).is_empty());
+        // 強調するときは、強調したエージェントだけ全体を塗る
         assert_eq!(
-            filled_runs(&agents, 80, &badge_name(highlighted)),
+            filled_runs(&agents, 80, &highlight(emoji)),
             ["❌ claude: failed"]
         );
     }
@@ -1800,15 +1849,18 @@ mod tests {
         use AgentState::*;
         let mut agents = named_agents([Idle, Blocked, Working, Done, Error]);
         for a in &mut agents {
-            if a.title.as_deref() == Some("b") {
-                a.msg = Some("Allow Bash?".to_owned());
+            match a.title.as_deref() {
+                Some("b") => a.msg = Some("Allow Bash?".to_owned()),
+                Some("c") => a.msg = Some("Running".to_owned()),
+                _ => {}
             }
         }
-        let options = badge_name(highlight(ViewOptions::default()));
-        // 強調したエージェント（b, e）は今と同じく全体を塗り、それ以外は名前までをバッジにする
+        let options = highlight(ViewOptions::default());
+        // 強調したエージェント（b, e）は全体を塗り、名前と msg の間に境目がないので `: ` にする。
+        // それ以外は名前までをバッジにし、msg の前は空白
         assert_eq!(
             plain_with(&agents, 80, &options),
-            " [⋯ a]  [! b: Allow Bash?]  [↻ c]  [✓ d]  [✗ e]"
+            " [⋯ a]  [! b: Allow Bash?]  [↻ c] Running  [✓ d]  [✗ e]"
         );
         assert_eq!(
             filled_runs(&agents, 80, &options),

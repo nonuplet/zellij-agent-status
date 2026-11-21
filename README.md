@@ -27,7 +27,7 @@ pane size=1 borderless=true {
         badge_shape "round"
         nerd_font_icon_padding "true"
         highlight_attention "true"
-        badge_name "true"
+        badge_name "false"
     }
 }
 ```
@@ -38,19 +38,19 @@ pane size=1 borderless=true {
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
 | `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
-| `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。17 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
+| `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。18 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
 | `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |
-| `nerd_font` | `false` | Nerd Font モード（`true` / `false`）。バッジの端を `badge_shape` の形にし、名前の後ろにエージェント（`app`）のアイコンを付け（今は Claude Code のみ）、`icon_style` の既定値を `nerd` にする。`icon_style` を指定すればそちらが優先される |
+| `nerd_font` | `false` | Nerd Font モード（`true` / `false`）。バッジの端を `badge_shape` の形にし、名前の前にエージェント（`app`）のアイコンを付け（今は Claude Code のみ）、`icon_style` の既定値を `nerd` にする。`icon_style` を指定すればそちらが優先される |
 | `badge_shape` | `slash` | Nerd Font モードの状態バッジの端の形。斜め（`slash`）、矢印（`arrow`）、半円（`round`）のどれか。`nerd_font` が `false` なら使わない |
-| `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う |
+| `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う（`badge_name` が `true` なら、たいていは要らない） |
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
-| `badge_name` | `false` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。幅は変わらない。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジに戻る。絵文字アイコンはバッジにならないので効かない |
+| `badge_name` | `true` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
 
-状態アイコンと進捗は、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を `badge_shape` の形にします）。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
+状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を `badge_shape` の形にします）。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジになります。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
 
 `nerd_font` と `icon_style "nerd"` には、端末のフォントが [Nerd Fonts](https://www.nerdfonts.com/) である必要があります。Nerd Font のアイコンは 1 桁として幅を計算します。これらの文字は East Asian Width が Ambiguous なので、端末で Ambiguous な文字を 2 桁で表示する設定にしていると、表示がずれたり行からはみ出したりします。
 
-Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと端末の組み合わせで変わります（Mono 版のフォントでもはみ出すことがあり、1 桁に収まるフォントでは端末によってアイコンが潰れて見分けられないことがあります）。アイコンの右が切れたり隣の文字と重なったりするときは、`nerd_font_icon_padding "true"` を指定してください。
+Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと端末の組み合わせで変わります（Mono 版のフォントでもはみ出すことがあり、1 桁に収まるフォントでは端末によってアイコンが潰れて見分けられないことがあります）。名前までバッジに入れる（`badge_name` が既定で `true`、`app` のアイコンを名前の前に置く）のは、はみ出したアイコンがバッジの端で切れたり重なったりしないよう、アイコンの後ろに必ず文字が続くようにするためです。それでもアイコンの右が切れたり隣の文字と重なったりするとき（`badge_name "false"` のときや、幅が足りず状態アイコンだけになったときなど）は、`nerd_font_icon_padding "true"` を指定してください。
 
 `show_cwd` で表示されるのは、ペインのルートプロセス（通常はシェル）のカレントディレクトリです。エージェントが中で別のディレクトリ（worktree など）に移っても追従せず、SSH 先やサンドボックス内で動くエージェントでは手元のシェルのディレクトリが表示されます。worktree ごとに見分けたいときは、そのディレクトリに `cd` してからエージェントを起動してください。
 

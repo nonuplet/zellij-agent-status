@@ -15,7 +15,7 @@
 //!     badge_shape "round"
 //!     nerd_font_icon_padding "true"
 //!     highlight_attention "true"
-//!     badge_name "true"
+//!     badge_name "false"
 //! }
 //! ```
 //!
@@ -29,9 +29,9 @@
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
 //! | `nerd_font` | `false` | Nerd Font モード。バッジの端を `badge_shape` の形にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
 //! | `badge_shape` | `slash` | Nerd Font モードのバッジの端の形（`slash` / `arrow` / `round`）。`nerd_font` が false なら使わない |
-//! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け |
+//! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け（`badge_name` が true なら、たいていは要らない） |
 //! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
-//! | `badge_name` | `false` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコンでは使わない |
+//! | `badge_name` | `true` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。`false` なら状態アイコンと進捗だけをバッジにする。`true` なら名前と msg の間の `: ` を空白にする（強調したエージェントを除く）。絵文字アイコンでは使わない |
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(config.view.badge_shape, BadgeShape::Slash);
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
-        assert!(!config.view.badge_name);
+        assert!(config.view.badge_name);
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn max_length() {
-        let cases = [("40", Some(40)), ("17", Some(MIN_MAX_LENGTH)), ("0", None)];
+        let cases = [("40", Some(40)), ("18", Some(MIN_MAX_LENGTH)), ("0", None)];
         for (value, expected) in cases {
             let (config, warnings) =
                 Config::from_configuration(&configuration(&[("max_length", value)]));
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn invalid_max_length_falls_back_to_default_with_warning() {
-        for value in ["abc", "1", "16", "-1", "40.5", " 40", ""] {
+        for value in ["abc", "1", "17", "-1", "40.5", " 40", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("max_length", value),
                 ("apps", "claude"),
@@ -478,7 +478,7 @@ mod tests {
                 ("badge_name", value),
                 ("show_app", "false"),
             ]));
-            assert!(!config.view.badge_name, "{value}");
+            assert!(config.view.badge_name, "{value}");
             // 他のキーは影響を受けない
             assert!(!config.view.show_app, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
