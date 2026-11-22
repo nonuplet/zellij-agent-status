@@ -267,6 +267,8 @@ if let Some(msgs) = fit(&caps.msg, room, MIN_MSG_WIDTH) {
 }
 ```
 
+あわせて、`plan` が行頭の余白の幅も引数で受け取るようにする。今は区切りの幅は引数（`sep_width`）で受け取る一方、行頭の余白は `layout::PAD` を直接読んでいて、`fit` と `layout` が互いに依存している（1 の分割で見つかった）。
+
 ### 3-3. msg → cwd → 名前の順に縮める処理が、2 か所に別々に書かれている
 
 **今の実装**
@@ -281,6 +283,10 @@ if let Some(msgs) = fit(&caps.msg, room, MIN_MSG_WIDTH) {
 要素が 1 つなら、`fair_share` は `min(width, room)` になり、`fit` の判定は `Item::widths` の `fits` と同じになる。そのため、段階的に縮める関数を 1 つにして、「1 要素・`max_length`」と「全要素・`cols`」の 2 回呼ぶ。
 
 - 行の幅の計算には行頭の余白と区切りが入り、1 エージェント分には入らない。この差は呼び出し側で `room` に反映する。
+- `max_length` に収める処理（今の `Item::widths`）は `fit` に移す。
+  - 中身は幅の割り当てなのに `item.rs` にあるため、`fit` は `Item` と `CWD_OVERHEAD` を、`item` は `Widths` と `MIN_MSG_WIDTH` / `MIN_CWD_WIDTH` を使い、`item` と `fit` が互いに依存している（1 の分割で見つかった）。
+  - 1 では純粋な移動に徹するため、`item.rs` に残している。
+  - 移した後も、`Item::spans` が `Widths` を受け取るので、`item` は `fit` の `Widths` を使う。循環を完全になくすなら、`Widths` を `item` 側に置く（`Item` の各部分の幅なので、置き場所としても自然）。そうすると `fit` が `item` を使うだけの一方向になる。
 - 既存の `never_exceeds_width` / `never_exceeds_max_length` のテストで、表示が変わらないことを確かめる。
 
 ### 3-4. 幅の計算と Span の組み立てが、別々に実装されている
