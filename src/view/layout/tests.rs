@@ -480,17 +480,19 @@ fn max_length(max_length: usize) -> ViewOptions {
     }
 }
 
-/// 各エージェント分の幅（行頭の余白と区切りを除く）
+/// 各エージェント分の幅（行頭の余白と区切りを除く）。行末の `~` は、切れたエージェントの分に数える
 fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<usize> {
-    let mut widths = vec![0];
-    for span in layout(agents, cols, options).into_iter().skip(1) {
-        if span.role == Role::Plain && span.text == SEPARATOR {
-            widths.push(0);
-        } else {
-            *widths.last_mut().unwrap() += span.text.width();
+    let mut widths: Vec<(u32, usize)> = vec![];
+    for span in layout(agents, cols, options) {
+        let Some(pane_id) = span.pane_id else {
+            continue;
+        };
+        match widths.last_mut() {
+            Some((id, width)) if *id == pane_id => *width += span.text.width(),
+            _ => widths.push((pane_id, span.text.width())),
         }
     }
-    widths
+    widths.into_iter().map(|(_, width)| width).collect()
 }
 
 #[test]

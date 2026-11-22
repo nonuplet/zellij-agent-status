@@ -34,6 +34,9 @@ pub(super) struct Span {
     pub(super) text: String,
     pub(super) role: Role,
     pub(super) fill: Fill,
+    /// どのエージェントの部分か（エージェントのペインの id）。クリックしたときにフォーカスするペインになる。
+    /// 行頭の余白や区切りなど、どのエージェントにも属さない部分は None
+    pub(super) pane_id: Option<u32>,
 }
 
 impl Span {
@@ -42,11 +45,17 @@ impl Span {
             text: text.into(),
             role,
             fill: Fill::None,
+            pane_id: None,
         }
     }
 
     pub(super) fn with_fill(mut self, fill: Fill) -> Self {
         self.fill = fill;
+        self
+    }
+
+    pub(super) fn with_pane(mut self, pane_id: Option<u32>) -> Self {
+        self.pane_id = pane_id;
         self
     }
 }
