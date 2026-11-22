@@ -36,6 +36,7 @@ pub(super) struct Widths {
 
 /// 1 エージェント分の表示内容（切り詰める前）
 pub(super) struct Item {
+    pane_id: u32,
     state: AgentState,
     /// バッジに入れる範囲
     extent: BadgeExtent,
@@ -102,6 +103,7 @@ impl Item {
             .map_or_else(Default::default, |e| e.spans(agent.state));
         let extent = style.extent(agent.state);
         Item {
+            pane_id: agent.pane_id,
             state: agent.state,
             extent,
             left,
@@ -157,6 +159,8 @@ impl Item {
     /// 先頭から [`Item::extent`] の部分までをバッジに入れる（塗る）。バッジの右端（と内側の空白）は、
     /// バッジに入れた部分の直後に置く。
     /// 名前を省いたときは名前の部分が空になるので、右端はアイコンと進捗の直後に来る。
+    ///
+    /// どの Span にもこのエージェントのペインを持たせ、1 エージェント分のどこをクリックしてもフォーカスできるようにする。
     pub(super) fn spans(&self, widths: Widths) -> Vec<Span> {
         let mut label = vec![];
         let mut msg = vec![];
@@ -187,6 +191,9 @@ impl Item {
         spans.extend_from_slice(&self.right);
         spans.extend(parts.flatten());
         spans
+            .into_iter()
+            .map(|s| s.with_pane(Some(self.pane_id)))
+            .collect()
     }
 }
 

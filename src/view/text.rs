@@ -4,7 +4,7 @@ use std::path::Path;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::span::{Fill, Role, Span, width};
+use super::span::{Role, Span, width};
 
 /// 切り詰めたことを示す記号。
 /// `…`（U+2026）は East Asian Width が Ambiguous で、端末によっては 2 桁になるため使わない。
@@ -58,6 +58,7 @@ pub(super) fn truncate(text: &str, width: usize) -> String {
 /// 行全体が `cols` に収まらなければ、末尾を切って [`ELLIPSIS`] を付ける。
 /// [`ELLIPSIS`] は切れた Span と同じ背景で塗る。バッジの途中で切れたときは、バッジの色の塊が
 /// [`ELLIPSIS`] で終わる（右端の文字は付けない）ので、続きがあると分かる。
+/// [`ELLIPSIS`] は切れた Span のペインも引き継ぎ、クリックすると切れたエージェントのペインにフォーカスする。
 ///
 /// 切り詰めた Span は、文字列以外のフィールドを元の Span から引き継ぐ。
 pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
@@ -69,21 +70,21 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
     }
     let mut left = cols - 1;
     let mut out = vec![];
-    let mut fill = Fill::None;
+    let mut ellipsis = Span::new(ELLIPSIS, Role::Plain);
     for span in spans {
         let text = take_width(&span.text, left);
         let cut = text.len() < span.text.len();
         left -= text.width();
-        let span_fill = span.fill;
+        let (fill, pane_id) = (span.fill, span.pane_id);
         if !text.is_empty() {
             out.push(Span { text, ..span });
         }
         if cut {
-            fill = span_fill;
+            ellipsis = ellipsis.with_fill(fill).with_pane(pane_id);
             break;
         }
     }
-    out.push(Span::new(ELLIPSIS, Role::Plain).with_fill(fill));
+    out.push(ellipsis);
     out
 }
 
@@ -91,6 +92,7 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
 mod tests {
     use super::*;
     use crate::model::AgentState;
+    use crate::view::span::Fill;
 
     #[test]
     fn ellipsis_is_one_column_wide() {
@@ -117,6 +119,32 @@ mod tests {
             clamp(spans, 4),
             [
                 Span::new("abc", Role::Msg).with_fill(fill),
+                Span::new("~", Role::Plain),
+            ]
+        );
+    }
+
+    #[test]
+    fn clamp_gives_ellipsis_pane_of_cut_span() {
+        let spans = vec![
+            Span::new("abc", Role::Name).with_pane(Some(1)),
+            Span::new("  ", Role::Plain),
+            Span::new("de", Role::Name).with_pane(Some(2)),
+        ];
+        // エージェントの途中で切れたら、~ もそのエージェントの部分にする
+        assert_eq!(
+            clamp(spans.clone(), 3),
+            [
+                Span::new("ab", Role::Name).with_pane(Some(1)),
+                Span::new("~", Role::Plain).with_pane(Some(1)),
+            ]
+        );
+        // 区切りで切れたら、~ はどのエージェントの部分でもない
+        assert_eq!(
+            clamp(spans, 5),
+            [
+                Span::new("abc", Role::Name).with_pane(Some(1)),
+                Span::new(" ", Role::Plain),
                 Span::new("~", Role::Plain),
             ]
         );

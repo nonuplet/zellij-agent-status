@@ -46,7 +46,7 @@ Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` の `
 
 ## イベントの届き方
 
-- 必要な permission は `ReadApplicationState` だけ。
+- 必要な permission は `ReadApplicationState` と `ChangeApplicationState`（クリックでペインにフォーカスを移すために使う）。
 - ルートレコードを更新すると、内容が同じでも必ず `PaneUpdate` が届く。
   - attention が変わった場合の順序：`PaneAttentionChanged` → `PaneUpdate`（約 10ms 後）→ `TabUpdate` → `GlobalAttentionUpdate`
 - **`id` 付きレコードだけの更新では、イベントが届かない。** ただし attention が変わる場合は届く。
@@ -68,3 +68,6 @@ Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` の `
 
 - permission ダイアログはプラグインのペインに出るので、`set_selectable(false)` にしているとユーザが応答できない。このプラグインは、許可が得られるまで selectable のままにしている（`src/permission.rs`）。
   - unselectable の状態で本当に応答できないかは試していない。
+- 要求する permission を増やすと、以前に許可していても起動時にダイアログがまた出る。増やした分だけでなく、要求したすべての permission の許可を求められる。
+- `set_selectable(false)` にしたペインにも、マウスのクリック（`Event::Mouse`）は届く。
+- `focus_terminal_pane` で別のタブにあるペインを指定すると、そのタブにも切り替わる。`switch_tab_to` を呼ぶ必要はない。

@@ -11,7 +11,7 @@ use collect::Collector;
 use config::Config;
 use model::AgentStatus;
 use permission::Permission;
-use view::Theme;
+use view::{Line, Theme};
 
 /// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
 const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
@@ -24,6 +24,8 @@ struct State {
     /// 設定の警告。エージェントがいないときに表示する
     warnings: Vec<String>,
     theme: Theme,
+    /// 最後に描画した行。クリックされた列のエージェントを引くのに使う
+    line: Line,
 }
 
 register_plugin!(State);
@@ -40,7 +42,7 @@ impl ZellijPlugin for State {
         // 許可が出るまで selectable のままにする処理は Permission が持つ
         Permission::request();
         Collector::subscribe();
-        subscribe(&[EventType::ModeUpdate]);
+        subscribe(&[EventType::ModeUpdate, EventType::Mouse]);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -52,6 +54,10 @@ impl ZellijPlugin for State {
                 self.theme = theme;
                 changed
             }
+            Event::Mouse(mouse) => {
+                self.click(*mouse);
+                false
+            }
             _ => self.collector.update(&event),
         }
     }
@@ -60,12 +66,25 @@ impl ZellijPlugin for State {
         if rows == 0 {
             return;
         }
-        print!("{}", self.line(cols));
+        self.line = self.line(cols);
+        print!("{}", self.line.paint(&self.theme));
     }
 }
 
 impl State {
-    fn line(&self, cols: usize) -> String {
+    /// 描画した行のエージェントを左クリックしたら、そのペインにフォーカスする。
+    /// `focus_terminal_pane` は、ペインが別のタブにあればそのタブにも切り替える。
+    /// 行は見ない（Zellij の tab-bar と同じ）。ペインの枠などで行の番号がずれても、クリックを取りこぼさないようにするため。
+    fn click(&self, mouse: Mouse) {
+        let Mouse::LeftClick(_, col) = mouse else {
+            return;
+        };
+        if let Some(pane_id) = self.line.pane_at(col) {
+            focus_terminal_pane(pane_id, false, false);
+        }
+    }
+
+    fn line(&self, cols: usize) -> Line {
         if let Some(text) = permission_message(self.permission) {
             return self.message(text, cols);
         }
@@ -77,11 +96,11 @@ impl State {
         if empty && let Some(warning) = self.warnings.first() {
             return self.message(warning, cols);
         }
-        view::render_line(&statuses, cols, &self.theme, options)
+        view::render_line(&statuses, cols, options)
     }
 
-    fn message(&self, text: &str, cols: usize) -> String {
-        view::render_message(&format!("{MESSAGE_PREFIX}{text}"), cols, &self.theme)
+    fn message(&self, text: &str, cols: usize) -> Line {
+        view::render_message(&format!("{MESSAGE_PREFIX}{text}"), cols)
     }
 }
 
@@ -90,7 +109,9 @@ fn permission_message(permission: Permission) -> Option<&'static str> {
     match permission {
         // 許可ダイアログはこのペインに出る。ダイアログが出ている間はこの表示は見えない
         Permission::Pending => Some("permission の応答を待っています"),
-        Permission::Denied => Some("ReadApplicationState が許可されていないため表示できません"),
+        Permission::Denied => Some(
+            "ReadApplicationState と ChangeApplicationState が許可されていないため表示できません",
+        ),
         Permission::Granted => None,
     }
 }
