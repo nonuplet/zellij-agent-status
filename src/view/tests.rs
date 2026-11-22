@@ -30,6 +30,8 @@ fn test_theme() -> Theme {
     Theme {
         fg: Color::Indexed(7),
         bg: Color::Rgb(1, 2, 3),
+        select_fg: Color::Indexed(15),
+        select_bg: Color::Indexed(236),
         idle: Color::Indexed(8),
         working: Color::Indexed(6),
         blocked: Color::Indexed(3),
@@ -211,26 +213,108 @@ fn ellipsis_belongs_to_cut_agent() {
 }
 
 #[test]
-fn selected_agent_is_reversed() {
+fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
     let titled = |pane_id, title: &str| {
         let mut a = agent(pane_id, AgentState::Working);
         a.title = Some(title.to_owned());
         a
     };
     let a = [titled(1, "one"), titled(2, "two")];
-    let line = render_line(&a, 40, &ViewOptions::default());
-    let reversed = |painted: &str| -> Vec<String> {
-        painted
-            .split('\x1b')
-            .filter(|s| s.starts_with("[0;7;") || s.starts_with("[0;1;7;"))
-            .map(|s| s[s.find('m').unwrap() + 1..].to_owned())
-            .collect()
-    };
-    let unselected = line.paint(&test_theme(), None);
-    assert!(reversed(&unselected).is_empty());
+    // 選択モードの色（文字 15、背景 236）
+    let select = "38;5;15;48;5;236m";
 
-    // 選んだエージェントの Span だけを反転させる（バッジの端の空白から名前の後ろの空白まで）。文字は変えない
+    // 名前をバッジに入れないので、名前は行の色で描かれる
+    let options = ViewOptions {
+        badge_name: false,
+        ..Default::default()
+    };
+    let line = render_line(&a, 40, &options);
+    let unselected = line.paint(&test_theme(), None);
+    assert!(!unselected.contains("48;5;236"), "{unselected:?}");
+
     let selected = line.paint(&test_theme(), Some(2));
+    // 文字は変えない
     assert_eq!(strip_ansi(&selected), strip_ansi(&unselected));
-    assert_eq!(reversed(&selected).concat(), " ↻ two ");
+    // バッジ以外は、選んでいるエージェントの部分も含めて選択モードの色
+    assert!(
+        selected.contains(&format!("\x1b[0;1;{select}one")),
+        "{selected:?}"
+    );
+    assert!(
+        selected.contains(&format!("\x1b[0;1;{select}two")),
+        "{selected:?}"
+    );
+    // 普段の背景色は残らない
+    assert!(!selected.contains("48;2;1;2;3"), "{selected:?}");
+    // 行頭の余白・区切り・行末の余りも選択モードの色
+    assert!(
+        selected.starts_with(&format!("\x1b[0;{select} ")),
+        "{selected:?}"
+    );
+    assert!(
+        selected.ends_with(&format!(
+            "\x1b[0;48;5;236m{}\x1b[0m",
+            " ".repeat(40 - strip_ansi(&unselected).trim_end().width())
+        )),
+        "{selected:?}"
+    );
+
+    // 既定（名前までバッジ）で msg もない場合でも、色の塊（バッジ）は選んでいるエージェントだけに残る
+    let line = render_line(&a, 40, &ViewOptions::default());
+    let unselected = line.paint(&test_theme(), None);
+    let selected = line.paint(&test_theme(), Some(2));
+    let badge = |name| format!("\x1b[0;1;38;2;1;2;3;48;5;6m{name}");
+    assert!(unselected.contains(&badge("one")), "{unselected:?}");
+    assert!(unselected.contains(&badge("two")), "{unselected:?}");
+    assert!(selected.contains(&badge("two")), "{selected:?}");
+    assert!(!selected.contains(&badge("one")), "{selected:?}");
+    // 選んでいないエージェントは、状態の色のアイコンと、選択モードの文字色の名前を、選択モードの背景に描く
+    assert!(
+        selected.contains("\x1b[0;1;38;5;6;48;5;236m↻"),
+        "{selected:?}"
+    );
+    assert!(
+        selected.contains(&format!("\x1b[0;1;{select}one")),
+        "{selected:?}"
+    );
+    // 状態の色の背景（48;5;6）は、選んでいるエージェントの部分にしかない
+    let filled: Vec<&str> = selected
+        .split('\x1b')
+        .filter(|s| s.contains("48;5;6m"))
+        .map(|s| &s[s.find('m').unwrap() + 1..])
+        .collect();
+    assert_eq!(filled.concat(), " ↻ two ", "{selected:?}");
+}
+
+#[test]
+fn selection_mode_hides_badge_ends_of_unselected_agents() {
+    let a = [agent(1, AgentState::Error), agent(2, AgentState::Idle)];
+    let nerd = ViewOptions {
+        nerd_font: true,
+        ..Default::default()
+    };
+    let line = render_line(&a, 40, &nerd);
+    let selected = line.paint(&test_theme(), Some(2));
+    assert_eq!(
+        strip_ansi(&selected),
+        strip_ansi(&line.paint(&test_theme(), None))
+    );
+    // 選んでいないエージェントのバッジの端は、背景と同じ色（236）で描いて見えなくする
+    assert!(
+        selected.contains("\x1b[0;38;5;236;48;5;236m\u{e0ba}"),
+        "{selected:?}"
+    );
+    assert!(
+        selected.contains("\x1b[0;38;5;236;48;5;236m\u{e0bc}"),
+        "{selected:?}"
+    );
+    // 選んでいるエージェントのバッジの端は、状態の色（idle は 8）で描き、外側は選択モードの背景（236）にする
+    assert!(
+        selected.contains("\x1b[0;38;5;8;48;5;236m\u{e0ba}"),
+        "{selected:?}"
+    );
+    assert!(
+        selected.contains("\x1b[0;38;5;8;48;5;236m\u{e0bc}"),
+        "{selected:?}"
+    );
 }
