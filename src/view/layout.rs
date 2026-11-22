@@ -233,14 +233,16 @@ struct Widths {
 }
 
 impl Item {
-    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
+    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める
+    /// （`show_tab_name` が false ならタブ名を、`show_app_name` が false なら `app` を飛ばす）。
     /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
-    /// `app` のアイコンは名前の候補とは別なので、`show_app` に関係なく付ける。
+    /// `app` のアイコンは名前の候補とは別なので、`show_app_name` に関係なく付ける。
     fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
-        let app = agent.app.as_deref().filter(|_| options.show_app);
+        let tab_name = agent.tab_name.as_deref().filter(|_| options.show_tab_name);
+        let app = agent.app.as_deref().filter(|_| options.show_app_name);
         let name = clean(agent.title.as_deref())
-            .or_else(|| clean(agent.tab_name.as_deref()))
+            .or_else(|| clean(tab_name))
             .or_else(|| clean(app))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         let cwd = agent
@@ -759,7 +761,7 @@ mod tests {
     #[test]
     fn hidden_app_is_skipped_as_name() {
         let hide_app = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
@@ -768,6 +770,39 @@ mod tests {
         assert_eq!(plain_with(&[a.clone()], 80, &hide_app), " [⋯ work] waiting");
         a.title = Some("my-project".to_owned());
         assert_eq!(plain_with(&[a], 80, &hide_app), " [⋯ my-project] waiting");
+    }
+
+    #[test]
+    fn hidden_tab_name_is_skipped_as_name() {
+        let hide_tab_name = ViewOptions {
+            show_tab_name: false,
+            ..base()
+        };
+        let mut a = agent(7, AgentState::Idle);
+        a.tab_name = Some("work".to_owned());
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_tab_name), " [⋯ claude]");
+        a.title = Some("my-project".to_owned());
+        assert_eq!(
+            plain_with(&[a.clone()], 80, &hide_tab_name),
+            " [⋯ my-project]"
+        );
+        a.title = None;
+        a.app = None;
+        assert_eq!(plain_with(&[a], 80, &hide_tab_name), " [⋯ #7]");
+    }
+
+    #[test]
+    fn hidden_tab_name_and_app_fall_back_from_title_to_pane_id() {
+        let hide_both = ViewOptions {
+            show_tab_name: false,
+            show_app_name: false,
+            ..base()
+        };
+        let mut a = agent(7, AgentState::Idle);
+        a.tab_name = Some("work".to_owned());
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_both), " [⋯ #7]");
+        a.title = Some("my-project".to_owned());
+        assert_eq!(plain_with(&[a], 80, &hide_both), " [⋯ my-project]");
     }
 
     #[test]
@@ -789,6 +824,24 @@ mod tests {
             ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ z]  [⋯ a]");
+
+        // タブ名を名前の候補から外しても、並び順と絞り込みは変わらない
+        let hide_tab_name = ViewOptions {
+            show_tab_name: false,
+            ..base()
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &hide_tab_name),
+            " [⋯ claude]  [⋯ codex]  [⋯ claude]"
+        );
+        let only_claude = ViewOptions {
+            show_tab_name: false,
+            ..only_claude
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &only_claude),
+            " [⋯ claude]  [⋯ claude]"
+        );
     }
 
     #[test]
@@ -801,12 +854,12 @@ mod tests {
 
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ #1]");
         let hide_app = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         assert_eq!(
@@ -1385,11 +1438,11 @@ mod tests {
     }
 
     #[test]
-    fn nerd_font_app_icon_ignores_show_app() {
+    fn nerd_font_app_icon_ignores_show_app_name() {
         let mut a = agent(7, AgentState::Idle);
         a.app = Some("claude-code".to_owned());
         let options = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..nerd_font(BadgeShape::Slash)
         };
         assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186} \u{ec82} #7 ]");

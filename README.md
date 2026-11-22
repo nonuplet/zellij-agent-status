@@ -19,7 +19,8 @@ pane size=1 borderless=true {
     plugin location="file:/path/to/zellij-agent-status.wasm" {
         icon_style "alphabet"
         apps "claude-code"
-        show_app "false"
+        show_app_name "false"
+        show_tab_name "false"
         blocked_first "true"
         max_length 40
         show_cwd "true"
@@ -37,7 +38,8 @@ pane size=1 borderless=true {
 |---|---|---|
 | `icon_style` | `symbol`（`nerd_font` が `true` なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか。絵文字は状態の色で塗られず、バッジにもならない |
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
-| `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
+| `show_app_name` | `true` | `app` を名前の候補にするか（`true` / `false`）。`apps` の絞り込みには影響しない |
+| `show_tab_name` | `true` | タブ名を名前の候補にするか（`true` / `false`）。タブバーなどでタブ名がすでに見えているときや、1 タブに 1 エージェントしか置かないときは `false` にすると重複しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
 | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。18 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
 | `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |
@@ -47,6 +49,8 @@ pane size=1 borderless=true {
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
 | `badge_name` | `true` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
 | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、注意が必要な状態（`Blocked` / `Error`、`highlight_attention` と同じ）のエージェントだけ（`attention`）、すべて（`all`）のどれか。msg を表示しないエージェントの分の幅は、ほかの部分に回す |
+
+エージェントの名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が `false` ならタブ名 / `app` を飛ばします。Claude Code は `title` を送らないので、両方 `false` にすると名前は `#<pane_id>` になります。
 
 状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を `badge_shape` の形にします）。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジになります。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
 
