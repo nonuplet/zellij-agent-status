@@ -7,7 +7,7 @@
 //! plugin location="file:zellij-agent-status.wasm" {
 //!     icon_style "alphabet"
 //!     apps "claude-code, codex"
-//!     show_app "false"
+//!     show_app_name "false"
 //!     blocked_first "true"
 //!     max_length 40
 //!     show_cwd "true"
@@ -24,7 +24,7 @@
 //! |---|---|---|
 //! | `icon_style` | `symbol`（`nerd_font` が true なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
-//! | `show_app` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
+//! | `show_app_name` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //! | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
@@ -38,8 +38,8 @@
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
 //!
-//! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app false`）も
-//! 文字列（`show_app "false"`）も、Zellij からは同じ文字列で届く。
+//! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app_name false`）も
+//! 文字列（`show_app_name "false"`）も、Zellij からは同じ文字列で届く。
 //!
 //! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/layout.rs`）で固定している。
 //!
@@ -98,11 +98,11 @@ impl Config {
             config.view.apps = parse_apps(value);
         }
 
-        if let Some(value) = configuration.get("show_app") {
+        if let Some(value) = configuration.get("show_app_name") {
             match parse_bool(value) {
-                Some(show_app) => config.view.show_app = show_app,
+                Some(show_app_name) => config.view.show_app_name = show_app_name,
                 None => warnings.push(format!(
-                    "show_app: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                    "show_app_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
                 )),
             }
         }
@@ -247,7 +247,7 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(config.view.icons, IconStyle::Symbol);
         assert_eq!(config.view.apps, None);
-        assert!(config.view.show_app);
+        assert!(config.view.show_app_name);
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
         assert!(!config.view.show_cwd);
@@ -308,12 +308,12 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("nerd_font", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(!config.view.nerd_font, "{value}");
             assert_eq!(config.view.icons, IconStyle::Symbol, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("nerd_font:"), "{value}");
         }
@@ -376,11 +376,11 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("blocked_first", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(!config.view.blocked_first, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("blocked_first:"), "{value}");
         }
@@ -421,11 +421,11 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("show_cwd", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(!config.view.show_cwd, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("show_cwd:"), "{value}");
         }
@@ -446,11 +446,11 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("nerd_font_icon_padding", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(!config.view.nerd_font_icon_padding, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(
                 warnings[0].starts_with("nerd_font_icon_padding:"),
@@ -474,11 +474,11 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("highlight_attention", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(!config.view.highlight_attention, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("highlight_attention:"), "{value}");
         }
@@ -499,11 +499,11 @@ mod tests {
         for value in ["yes", "True", "1", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("badge_name", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert!(config.view.badge_name, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("badge_name:"), "{value}");
         }
@@ -529,34 +529,34 @@ mod tests {
         for value in ["All", "blocked", "true", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("msg_mode", value),
-                ("show_app", "false"),
+                ("show_app_name", "false"),
             ]));
             assert_eq!(config.view.msg_mode, MsgMode::Attention, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.show_app, "{value}");
+            assert!(!config.view.show_app_name, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("msg_mode:"), "{value}");
         }
     }
 
     #[test]
-    fn show_app() {
+    fn show_app_name() {
         for (value, expected) in [("true", true), ("false", false)] {
             let (config, warnings) =
-                Config::from_configuration(&configuration(&[("show_app", value)]));
+                Config::from_configuration(&configuration(&[("show_app_name", value)]));
             assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.show_app, expected, "{value}");
+            assert_eq!(config.view.show_app_name, expected, "{value}");
         }
     }
 
     #[test]
-    fn invalid_show_app_falls_back_to_default_with_warning() {
+    fn invalid_show_app_name_falls_back_to_default_with_warning() {
         for value in ["no", "False", "0", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("show_app", value),
+                ("show_app_name", value),
                 ("apps", "claude"),
             ]));
-            assert!(config.view.show_app, "{value}");
+            assert!(config.view.show_app_name, "{value}");
             // 他のキーは影響を受けない
             assert_eq!(
                 config.view.apps,
@@ -564,7 +564,7 @@ mod tests {
                 "{value}"
             );
             assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("show_app:"), "{value}");
+            assert!(warnings[0].starts_with("show_app_name:"), "{value}");
         }
     }
 

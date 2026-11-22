@@ -19,7 +19,7 @@ pane size=1 borderless=true {
     plugin location="file:/path/to/zellij-agent-status.wasm" {
         icon_style "alphabet"
         apps "claude-code"
-        show_app "false"
+        show_app_name "false"
         blocked_first "true"
         max_length 40
         show_cwd "true"
@@ -37,7 +37,7 @@ pane size=1 borderless=true {
 |---|---|---|
 | `icon_style` | `symbol`（`nerd_font` が `true` なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか。絵文字は状態の色で塗られず、バッジにもならない |
 | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
-| `show_app` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
+| `show_app_name` | `true` | `app` を名前の候補にするか（`true` / `false`）。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす。`apps` の絞り込みには影響しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
 | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。18 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
 | `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |

@@ -28,7 +28,7 @@ pub struct ViewOptions {
     pub apps: Option<Vec<String>>,
     /// `app` を名前の候補にするか。false なら名前は `title` → タブ名 → `#<pane_id>` の順で決める。
     /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
-    pub show_app: bool,
+    pub show_app_name: bool,
     /// `Blocked` のエージェントを先頭に並べるか（[`layout()`] の並べ替え）
     pub blocked_first: bool,
     /// 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。None なら上限なし。
@@ -81,13 +81,13 @@ impl MsgMode {
 /// [`ViewOptions::max_length`] の既定値
 pub const DEFAULT_MAX_LENGTH: usize = 50;
 
-// show_app などの既定値を指定するため、derive せずに書く
+// show_app_name などの既定値を指定するため、derive せずに書く
 impl Default for ViewOptions {
     fn default() -> Self {
         ViewOptions {
             icons: IconStyle::default(),
             apps: None,
-            show_app: true,
+            show_app_name: true,
             blocked_first: false,
             max_length: Some(DEFAULT_MAX_LENGTH),
             show_cwd: false,

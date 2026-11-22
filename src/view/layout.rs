@@ -233,12 +233,12 @@ struct Widths {
 }
 
 impl Item {
-    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app` が false なら `app` を飛ばす）。
+    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app_name` が false なら `app` を飛ばす）。
     /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
-    /// `app` のアイコンは名前の候補とは別なので、`show_app` に関係なく付ける。
+    /// `app` のアイコンは名前の候補とは別なので、`show_app_name` に関係なく付ける。
     fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
-        let app = agent.app.as_deref().filter(|_| options.show_app);
+        let app = agent.app.as_deref().filter(|_| options.show_app_name);
         let name = clean(agent.title.as_deref())
             .or_else(|| clean(agent.tab_name.as_deref()))
             .or_else(|| clean(app))
@@ -759,7 +759,7 @@ mod tests {
     #[test]
     fn hidden_app_is_skipped_as_name() {
         let hide_app = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
@@ -801,12 +801,12 @@ mod tests {
 
         let only_claude = ViewOptions {
             apps: Some(vec!["claude".to_owned()]),
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ #1]");
         let hide_app = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..base()
         };
         assert_eq!(
@@ -1385,11 +1385,11 @@ mod tests {
     }
 
     #[test]
-    fn nerd_font_app_icon_ignores_show_app() {
+    fn nerd_font_app_icon_ignores_show_app_name() {
         let mut a = agent(7, AgentState::Idle);
         a.app = Some("claude-code".to_owned());
         let options = ViewOptions {
-            show_app: false,
+            show_app_name: false,
             ..nerd_font(BadgeShape::Slash)
         };
         assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186} \u{ec82} #7 ]");
