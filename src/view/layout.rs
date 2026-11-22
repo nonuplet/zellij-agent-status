@@ -233,14 +233,16 @@ struct Widths {
 }
 
 impl Item {
-    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める（`show_app_name` が false なら `app` を飛ばす）。
+    /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める
+    /// （`show_tab_name` が false ならタブ名を、`show_app_name` が false なら `app` を飛ばす）。
     /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// 名前は必ずある前提で [`plan`] と [`Item::spans`] を書いているので、最後は `#<pane_id>` にする。
     /// `app` のアイコンは名前の候補とは別なので、`show_app_name` に関係なく付ける。
     fn new(agent: &AgentStatus, options: &ViewOptions) -> Self {
+        let tab_name = agent.tab_name.as_deref().filter(|_| options.show_tab_name);
         let app = agent.app.as_deref().filter(|_| options.show_app_name);
         let name = clean(agent.title.as_deref())
-            .or_else(|| clean(agent.tab_name.as_deref()))
+            .or_else(|| clean(tab_name))
             .or_else(|| clean(app))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         let cwd = agent
@@ -771,6 +773,39 @@ mod tests {
     }
 
     #[test]
+    fn hidden_tab_name_is_skipped_as_name() {
+        let hide_tab_name = ViewOptions {
+            show_tab_name: false,
+            ..base()
+        };
+        let mut a = agent(7, AgentState::Idle);
+        a.tab_name = Some("work".to_owned());
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_tab_name), " [⋯ claude]");
+        a.title = Some("my-project".to_owned());
+        assert_eq!(
+            plain_with(&[a.clone()], 80, &hide_tab_name),
+            " [⋯ my-project]"
+        );
+        a.title = None;
+        a.app = None;
+        assert_eq!(plain_with(&[a], 80, &hide_tab_name), " [⋯ #7]");
+    }
+
+    #[test]
+    fn hidden_tab_name_and_app_fall_back_from_title_to_pane_id() {
+        let hide_both = ViewOptions {
+            show_tab_name: false,
+            show_app_name: false,
+            ..base()
+        };
+        let mut a = agent(7, AgentState::Idle);
+        a.tab_name = Some("work".to_owned());
+        assert_eq!(plain_with(&[a.clone()], 80, &hide_both), " [⋯ #7]");
+        a.title = Some("my-project".to_owned());
+        assert_eq!(plain_with(&[a], 80, &hide_both), " [⋯ my-project]");
+    }
+
+    #[test]
     fn tab_name_does_not_affect_order_or_filter() {
         let mut a = agent(5, AgentState::Idle);
         a.tab_name = Some("z".to_owned());
@@ -789,6 +824,24 @@ mod tests {
             ..base()
         };
         assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ z]  [⋯ a]");
+
+        // タブ名を名前の候補から外しても、並び順と絞り込みは変わらない
+        let hide_tab_name = ViewOptions {
+            show_tab_name: false,
+            ..base()
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &hide_tab_name),
+            " [⋯ claude]  [⋯ codex]  [⋯ claude]"
+        );
+        let only_claude = ViewOptions {
+            show_tab_name: false,
+            ..only_claude
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &only_claude),
+            " [⋯ claude]  [⋯ claude]"
+        );
     }
 
     #[test]

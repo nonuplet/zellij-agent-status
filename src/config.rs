@@ -8,6 +8,7 @@
 //!     icon_style "alphabet"
 //!     apps "claude-code, codex"
 //!     show_app_name "false"
+//!     show_tab_name "false"
 //!     blocked_first "true"
 //!     max_length 40
 //!     show_cwd "true"
@@ -24,7 +25,8 @@
 //! |---|---|---|
 //! | `icon_style` | `symbol`（`nerd_font` が true なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか |
 //! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
-//! | `show_app_name` | `true` | `app` を名前の候補にするか。名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`false` なら `app` を飛ばす |
+//! | `show_app_name` | `true` | `app` を名前の候補にするか |
+//! | `show_tab_name` | `true` | タブ名を名前の候補にするか |
 //! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
 //! | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
 //! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
@@ -34,6 +36,9 @@
 //! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
 //! | `badge_name` | `true` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。`false` なら状態アイコンと進捗だけをバッジにする。`true` なら名前と msg の間の `: ` を空白にする（強調したエージェントを除く）。絵文字アイコンでは使わない |
 //! | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、`Blocked` / `Error` だけ（`attention`）、すべて（`all`）のどれか |
+//!
+//! 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が
+//! `false` ならタブ名 / `app` を飛ばす（`src/view/layout.rs` の `Item::new`）。
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -103,6 +108,15 @@ impl Config {
                 Some(show_app_name) => config.view.show_app_name = show_app_name,
                 None => warnings.push(format!(
                     "show_app_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
+                )),
+            }
+        }
+
+        if let Some(value) = configuration.get("show_tab_name") {
+            match parse_bool(value) {
+                Some(show_tab_name) => config.view.show_tab_name = show_tab_name,
+                None => warnings.push(format!(
+                    "show_tab_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
                 )),
             }
         }
@@ -248,6 +262,7 @@ mod tests {
         assert_eq!(config.view.icons, IconStyle::Symbol);
         assert_eq!(config.view.apps, None);
         assert!(config.view.show_app_name);
+        assert!(config.view.show_tab_name);
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
         assert!(!config.view.show_cwd);
@@ -565,6 +580,31 @@ mod tests {
             );
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("show_app_name:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn show_tab_name() {
+        for (value, expected) in [("true", true), ("false", false)] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("show_tab_name", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.show_tab_name, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn invalid_show_tab_name_falls_back_to_default_with_warning() {
+        for value in ["no", "False", "0", ""] {
+            let (config, warnings) = Config::from_configuration(&configuration(&[
+                ("show_tab_name", value),
+                ("show_app_name", "false"),
+            ]));
+            assert!(config.view.show_tab_name, "{value}");
+            // 他のキーは影響を受けない
+            assert!(!config.view.show_app_name, "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("show_tab_name:"), "{value}");
         }
     }
 
