@@ -11,7 +11,10 @@ use super::theme::Theme;
 ///
 /// 状態の色で塗る Span（[`Fill::State`]）は、文字を行の背景色にして色を反転させる。
 /// 状態の色は前景色向けの色なので、背景にしたときの見え方はテーマ次第になる。
-pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme) -> String {
+///
+/// `selected` のエージェントの Span は、SGR の反転（7）を付けて表示する（キー操作での選択中）。
+/// 色を指定せずに反転にするのは、テーマの色やバッジの色と区別できるようにするため。
+pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme, selected: Option<u32>) -> String {
     let line_bg = theme.bg.bg();
     let mut out = String::new();
     let mut used = 0;
@@ -27,8 +30,13 @@ pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme) -> String {
             Fill::State(state) => (theme.bg.fg(), theme.state(state).bg()),
         };
         let bold = if bold { "1;" } else { "" };
+        let reverse = if selected.is_some() && span.pane_id == selected {
+            "7;"
+        } else {
+            ""
+        };
         // String への write! は失敗しないので、結果は捨てる
-        let _ = write!(out, "\x1b[0;{bold}{fg};{bg}m{}", span.text);
+        let _ = write!(out, "\x1b[0;{bold}{reverse}{fg};{bg}m{}", span.text);
         used += span.text.width();
     }
     let _ = write!(

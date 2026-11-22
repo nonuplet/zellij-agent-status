@@ -39,7 +39,7 @@ fn test_theme() -> Theme {
 }
 
 fn painted(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> String {
-    render_line(agents, cols, options).paint(&test_theme())
+    render_line(agents, cols, options).paint(&test_theme(), None)
 }
 
 #[test]
@@ -139,7 +139,8 @@ fn paint_inverts_highlighted_agent_and_skips_emoji_badge() {
 
 #[test]
 fn message_is_cleaned_truncated_and_filled() {
-    let message = |text, cols| strip_ansi(&render_message(text, cols).paint(&Theme::default()));
+    let message =
+        |text, cols| strip_ansi(&render_message(text, cols).paint(&Theme::default(), None));
     let visible = message("設定の\n警告です", 12);
     assert_eq!(visible.width(), 12);
     assert_eq!(visible, " 設定の 警~ ");
@@ -180,7 +181,7 @@ fn whole_agent_is_clickable_except_padding_and_separators() {
     };
     let line = render_line(&a, 40, &options);
     assert_eq!(
-        strip_ansi(&line.paint(&test_theme())),
+        strip_ansi(&line.paint(&test_theme(), None)),
         "  ↻ claude  Running   ! claude  Allow?  "
     );
     // バッジの端から msg の末尾までがそのエージェントの部分。行頭の余白・区切り・行末の空白は当たらない
@@ -202,7 +203,34 @@ fn ellipsis_belongs_to_cut_agent() {
     };
     // 2 つ目の msg の途中で切れる。末尾の ~ も 2 つ目の部分
     let line = render_line(&a, 30, &options);
-    let visible = strip_ansi(&line.paint(&test_theme()));
+    let visible = strip_ansi(&line.paint(&test_theme(), None));
     assert!(visible.ends_with('~'), "{visible:?}");
     assert_eq!(line.pane_at(29), Some(2));
+    // 一部だけ見えているエージェントも選べる
+    assert_eq!(line.pane_ids(), [1, 2]);
+}
+
+#[test]
+fn selected_agent_is_reversed() {
+    let titled = |pane_id, title: &str| {
+        let mut a = agent(pane_id, AgentState::Working);
+        a.title = Some(title.to_owned());
+        a
+    };
+    let a = [titled(1, "one"), titled(2, "two")];
+    let line = render_line(&a, 40, &ViewOptions::default());
+    let reversed = |painted: &str| -> Vec<String> {
+        painted
+            .split('\x1b')
+            .filter(|s| s.starts_with("[0;7;") || s.starts_with("[0;1;7;"))
+            .map(|s| s[s.find('m').unwrap() + 1..].to_owned())
+            .collect()
+    };
+    let unselected = line.paint(&test_theme(), None);
+    assert!(reversed(&unselected).is_empty());
+
+    // 選んだエージェントの Span だけを反転させる（バッジの端の空白から名前の後ろの空白まで）。文字は変えない
+    let selected = line.paint(&test_theme(), Some(2));
+    assert_eq!(strip_ansi(&selected), strip_ansi(&unselected));
+    assert_eq!(reversed(&selected).concat(), " ↻ two ");
 }

@@ -22,8 +22,22 @@ impl Line {
     }
 
     /// ANSI エスケープ付きの文字列にする。末尾は背景色の空白で埋める。
-    pub fn paint(&self, theme: &Theme) -> String {
-        paint(&self.spans, self.cols, theme)
+    /// `selected` のエージェントの部分は反転して表示する（キー操作で選んでいるエージェント）。
+    pub fn paint(&self, theme: &Theme, selected: Option<u32>) -> String {
+        paint(&self.spans, self.cols, theme, selected)
+    }
+
+    /// 表示しているエージェントのペインの id を、左から順に並べたもの。キー操作で選べるのはこのエージェントだけ。
+    /// 行末の切り詰めで一部だけ見えているエージェントも含む（クリックでもフォーカスできるため）。
+    pub fn pane_ids(&self) -> Vec<u32> {
+        let mut pane_ids: Vec<u32> = vec![];
+        for pane_id in self.spans.iter().filter_map(|s| s.pane_id) {
+            // 1 エージェント分の Span は続けて並ぶので、直前と同じかだけを見ればよい
+            if pane_ids.last() != Some(&pane_id) {
+                pane_ids.push(pane_id);
+            }
+        }
+        pane_ids
     }
 
     /// 列 `col`（0 始まり）に表示しているエージェントのペインの id。
@@ -80,5 +94,23 @@ mod tests {
     #[test]
     fn empty_line_has_no_pane() {
         assert_eq!(Line::default().pane_at(0), None);
+        assert!(Line::default().pane_ids().is_empty());
+    }
+
+    #[test]
+    fn pane_ids_are_in_display_order() {
+        let line = Line::new(
+            vec![
+                Span::new(" ", Role::Plain),
+                Span::new("a", Role::Name).with_pane(Some(5)),
+                Span::new("b", Role::Msg).with_pane(Some(5)),
+                Span::new("  ", Role::Plain),
+                Span::new("c", Role::Name).with_pane(Some(2)),
+                Span::new("  ", Role::Plain),
+                Span::new("d", Role::Name).with_pane(Some(9)),
+            ],
+            20,
+        );
+        assert_eq!(line.pane_ids(), [5, 2, 9]);
     }
 }

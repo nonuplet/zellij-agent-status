@@ -8,8 +8,26 @@ OSC 7501 を読んでステータスの情報を取得します。Zellij 0.46 �
 
 - Claude Code（最新版）は自分で OSC 7501 を送るので、hooks などの設定なしで表示されます。エージェントごとの挙動は `doc/agent-behaviors.md` を参照してください。
 - 手動で送るときは `scripts/osc7501.sh` を使います。
-- 初回の起動時は、プラグインのペインに permission（`ReadApplicationState` と `ChangeApplicationState`）の確認が出ます。1 行のペインなので全文は読めませんが、ペインをクリックしてフォーカスし、許可してください。許可するまでエージェントの状態は表示されません。
+- 初回の起動時は、プラグインのペインに permission（`ReadApplicationState`・`ChangeApplicationState`・`InterceptInput`・`Reconfigure`）の確認が出ます。1 行のペインなので全文は読めませんが、ペインをクリックしてフォーカスし、許可してください。許可するまでエージェントの状態は表示されません。
 - 並んでいるエージェントをクリックすると、そのエージェントのペインにフォーカスが移ります。ペインが別のタブにあれば、そのタブに切り替わります。
+- キー操作でも選べます。`Ctrl t`（tab モード）→ `a` で選択モードに入り、`←` / `→`（`h` / `l`）で選んで `Enter` でそのペインにフォーカスします。`Esc`（`Ctrl c`）で何もせずに抜けます。選択モード中に行をクリックしたり、ほかのペインやタブにフォーカスが移ったりしたときも抜けます。
+
+### 選択モードのキー
+
+選択モードに入るキーは、起動時にプラグインが実行中のセッションの tab モードに登録します（`reconfigure`）。ユーザの設定ファイル（`config.kdl`）は書き換えません。キーは `select_key` で変えられ、`select_key ""` にすると登録しません。tab モードですでに使われているキーを指定したときは登録せず、警告を出します。ただし、そのキーが `MessagePlugin` に使われているときは、ほかのプラグイン宛てでも警告を出しません（プラグインからはパイプの宛先が見えないため）。
+
+自分で `config.kdl` に書く場合は、次のようにパイプの `name` だけを指定します（`plugin` に URL を書くと、別のインスタンスが起動することがあります）。別のキーやモードに書くときは、`select_key ""` にしてプラグインによる登録を止めてください。
+
+```kdl
+keybinds {
+    tab {
+        bind "a" {
+            MessagePlugin { name "zellij-agent-status::select"; }
+            SwitchToMode "Normal"; // unlock-first のプリセットなら "Locked"
+        }
+    }
+}
+```
 
 ## 設定
 
@@ -31,6 +49,7 @@ pane size=1 borderless=true {
         highlight_attention "true"
         badge_name "false"
         msg_mode "all"
+        select_key "g"
     }
 }
 ```
@@ -50,6 +69,7 @@ pane size=1 borderless=true {
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
 | `badge_name` | `true` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
 | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、注意が必要な状態（`Blocked` / `Error`、`highlight_attention` と同じ）のエージェントだけ（`attention`）、すべて（`all`）のどれか。msg を表示しないエージェントの分の幅は、ほかの部分に回す |
+| `select_key` | `a` | tab モードに登録する、選択モードに入るキー。`a` や `Ctrl a` のように、Zellij の `bind` と同じ書き方で指定する。空文字（`""`）なら登録しない |
 
 エージェントの名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が `false` ならタブ名 / `app` を飛ばします。Claude Code は `title` を送らないので、両方 `false` にすると名前は `#<pane_id>` になります。
 
@@ -61,7 +81,7 @@ Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと�
 
 `show_cwd` で表示されるのは、ペインのルートプロセス（通常はシェル）のカレントディレクトリです。エージェントが中で別のディレクトリ（worktree など）に移っても追従せず、SSH 先やサンドボックス内で動くエージェントでは手元のシェルのディレクトリが表示されます。worktree ごとに見分けたいときは、そのディレクトリに `cd` してからエージェントを起動してください。
 
-不正な値は既定値に戻し、エージェントがいないときにプラグインの行へ警告を出します。
+不正な値は既定値に戻し、エージェントがいないときにプラグインの行へ警告を出します（`select_key` のキーがすでに使われているときの警告も同じです）。
 
 ## 開発
 

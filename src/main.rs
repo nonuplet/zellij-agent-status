@@ -2,15 +2,19 @@ mod collect;
 mod config;
 mod model;
 mod permission;
+mod select;
 mod view;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use zellij_tile::prelude::*;
 
 use collect::Collector;
 use config::Config;
 use model::AgentStatus;
 use permission::Permission;
+use select::KeyAction;
+use select::focus::{self, Focus};
+use select::keybind::{Keybind, PIPE_NAME, Step};
 use view::{Line, Theme};
 
 /// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
@@ -24,8 +28,21 @@ struct State {
     /// 設定の警告。エージェントがいないときに表示する
     warnings: Vec<String>,
     theme: Theme,
-    /// 最後に描画した行。クリックされた列のエージェントを引くのに使う
+    /// 最後に描画した行。クリックされた列のエージェントや、キー操作で選べるエージェントを引くのに使う
     line: Line,
+    focus: Focus,
+    keybind: Keybind,
+    /// 選択モード中なら Some
+    selection: Option<Selection>,
+}
+
+/// 選択モードの状態
+struct Selection {
+    /// 選んでいるエージェントのペインの id
+    pane_id: u32,
+    /// 選択モードに入ったときの、アクティブなタブとフォーカス中のペイン（[`Focus::focused`]）。
+    /// ほかのペインやタブがクリックされるなどして変わったら、選択モードを抜ける
+    focus: (Option<usize>, Option<PaneId>),
 }
 
 register_plugin!(State);
@@ -36,30 +53,47 @@ impl ZellijPlugin for State {
         for warning in &warnings {
             eprintln!("{MESSAGE_PREFIX}{warning}");
         }
+        self.keybind = Keybind::new(config.select_key.clone());
         self.config = config;
         self.warnings = warnings;
+        self.focus = Focus::new(get_plugin_ids().plugin_id);
 
         // 許可が出るまで selectable のままにする処理は Permission が持つ
         Permission::request();
         Collector::subscribe();
-        subscribe(&[EventType::ModeUpdate, EventType::Mouse]);
+        subscribe(&[
+            EventType::ModeUpdate,
+            EventType::Mouse,
+            EventType::InterceptedKeyPress,
+        ]);
     }
 
     fn update(&mut self, event: Event) -> bool {
         match &event {
-            Event::PermissionRequestResult(status) => self.permission.update(*status),
+            Event::PermissionRequestResult(status) => {
+                let changed = self.permission.update(*status);
+                self.sync_keybind() || changed
+            }
             Event::ModeUpdate(mode_info) => {
+                self.keybind.observe(mode_info);
+                let warned = self.sync_keybind();
                 let theme = Theme::from_styling(&mode_info.style.colors);
                 let changed = theme != self.theme;
                 self.theme = theme;
-                changed
+                changed || warned
             }
-            Event::Mouse(mouse) => {
-                self.click(*mouse);
-                false
+            Event::Mouse(mouse) => self.click(*mouse),
+            Event::InterceptedKeyPress(key) => self.key(key),
+            _ => {
+                self.focus.update(&event);
+                let changed = self.collector.update(&event);
+                self.leave_on_focus_change() || changed
             }
-            _ => self.collector.update(&event),
         }
+    }
+
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        pipe_message.name == PIPE_NAME && self.enter()
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
@@ -67,21 +101,162 @@ impl ZellijPlugin for State {
             return;
         }
         self.line = self.line(cols);
-        print!("{}", self.line.paint(&self.theme));
+        self.keep_selection_visible();
+        let selected = self.selection.as_ref().map(|s| s.pane_id);
+        print!("{}", self.line.paint(&self.theme, selected));
     }
 }
 
 impl State {
+    /// キーの登録を進める（[`select::keybind`]）。permission が拒否されたときや、まだ届いていないときは何もしない。
+    /// 警告を出したときに true を返す。
+    fn sync_keybind(&mut self) -> bool {
+        if self.permission != Permission::Granted {
+            return false;
+        }
+        match self.keybind.step() {
+            Step::None => false,
+            Step::Register(kdl) => {
+                // セッション内だけに登録し、ユーザの設定ファイルには書き込まない
+                reconfigure(kdl, false);
+                false
+            }
+            Step::Warn(warning) => {
+                eprintln!("{MESSAGE_PREFIX}{warning}");
+                self.warnings.push(warning);
+                true
+            }
+        }
+    }
+
     /// 描画した行のエージェントを左クリックしたら、そのペインにフォーカスする。
     /// `focus_terminal_pane` は、ペインが別のタブにあればそのタブにも切り替える。
     /// 行は見ない（Zellij の tab-bar と同じ）。ペインの枠などで行の番号がずれても、クリックを取りこぼさないようにするため。
-    fn click(&self, mouse: Mouse) {
+    /// 選択モード中なら、どこをクリックしても選択モードを抜ける。再描画が必要なときに true を返す。
+    fn click(&mut self, mouse: Mouse) -> bool {
         let Mouse::LeftClick(_, col) = mouse else {
-            return;
+            return false;
         };
+        let left = self.leave();
         if let Some(pane_id) = self.line.pane_at(col) {
             focus_terminal_pane(pane_id, false, false);
         }
+        left
+    }
+
+    /// パイプを受け取ったら選択モードに入る。
+    /// パイプは全インスタンスに届くので、アクティブなタブにいるインスタンスだけが入る。
+    /// 表示中のエージェントがなければ入らない。
+    fn enter(&mut self) -> bool {
+        if self.selection.is_some() || self.permission != Permission::Granted {
+            return false;
+        }
+        // バックグラウンドのタブにいるインスタンスでは、イベントから求めたフォーカスが古いので、その場で問い合わせる
+        let Some(focused) = focus::focused_now() else {
+            return false;
+        };
+        if !self.focus.owns(focused) {
+            return false;
+        }
+        let focused_terminal = match focused {
+            PaneId::Terminal(id) => Some(id),
+            PaneId::Plugin(_) => None,
+        };
+        let Some(pane_id) = self.initial_selection(focused_terminal) else {
+            return false;
+        };
+        intercept_key_presses();
+        self.selection = Some(Selection {
+            pane_id,
+            focus: self.focus.focused(),
+        });
+        true
+    }
+
+    /// 選択モードを抜ける。横取りも必ずやめる。選択モード中だったときに true を返す
+    fn leave(&mut self) -> bool {
+        let left = self.selection.take().is_some();
+        if left {
+            clear_key_presses_intercepts();
+        }
+        left
+    }
+
+    /// 選択モード中に横取りしたキーを処理する。再描画が必要なときに true を返す。
+    fn key(&mut self, key: &KeyWithModifier) -> bool {
+        if self.selection.is_none() {
+            // 選択モードでないのに届いたら、横取りが残っているので念のためやめる
+            clear_key_presses_intercepts();
+            return false;
+        }
+        // 選択中にタブが切り替わっても、バックグラウンドになったインスタンスには TabUpdate が届かず気づけない。
+        // キーが届いた時点で確かめ、自分のタブがアクティブでなくなっていたら、そのキーは捨てて選択モードを抜ける
+        if !focus::focused_now().is_some_and(|pane| self.focus.owns(pane)) {
+            return self.leave();
+        }
+        let Some(selection) = &mut self.selection else {
+            return false;
+        };
+        match KeyAction::from_key(key) {
+            None => false,
+            Some(action @ (KeyAction::Prev | KeyAction::Next)) => {
+                let pane_id = select::step(&self.line.pane_ids(), selection.pane_id, action);
+                let changed = pane_id != selection.pane_id;
+                selection.pane_id = pane_id;
+                changed
+            }
+            Some(KeyAction::Confirm) => {
+                let pane_id = selection.pane_id;
+                self.leave();
+                focus_terminal_pane(pane_id, false, false);
+                true
+            }
+            Some(KeyAction::Cancel) => self.leave(),
+        }
+    }
+
+    /// 選択モード中にフォーカスが移ったら（ほかのペインやタブがクリックされたときなど）、選択モードを抜ける。
+    fn leave_on_focus_change(&mut self) -> bool {
+        match &self.selection {
+            Some(selection) if selection.focus != self.focus.focused() => self.leave(),
+            _ => false,
+        }
+    }
+
+    /// 選んでいたエージェントが行から消えたら、最初に選ぶときと同じ順で選び直す。
+    /// 表示中のエージェントがなくなったら、選択モードを抜ける。
+    fn keep_selection_visible(&mut self) {
+        let Some(selection) = &self.selection else {
+            return;
+        };
+        if self.line.pane_ids().contains(&selection.pane_id) {
+            return;
+        }
+        match self.initial_selection(self.focus.focused_terminal()) {
+            Some(pane_id) => {
+                if let Some(selection) = &mut self.selection {
+                    selection.pane_id = pane_id;
+                }
+            }
+            None => {
+                self.leave();
+            }
+        }
+    }
+
+    /// 選択モードで最初に選ぶエージェント（[`select::initial`]）。`focused` はフォーカス中のターミナルペイン
+    fn initial_selection(&self, focused: Option<u32>) -> Option<u32> {
+        let attention: HashSet<u32> = self
+            .collector
+            .statuses()
+            .filter(|s| s.state.needs_attention())
+            .map(|s| s.pane_id)
+            .collect();
+        select::initial(
+            &self.line.pane_ids(),
+            |pane_id| attention.contains(&pane_id),
+            focused,
+        )
     }
 
     fn line(&self, cols: usize) -> Line {
@@ -109,9 +284,7 @@ fn permission_message(permission: Permission) -> Option<&'static str> {
     match permission {
         // 許可ダイアログはこのペインに出る。ダイアログが出ている間はこの表示は見えない
         Permission::Pending => Some("permission の応答を待っています"),
-        Permission::Denied => Some(
-            "ReadApplicationState と ChangeApplicationState が許可されていないため表示できません",
-        ),
+        Permission::Denied => Some("必要な permission が許可されていないため表示できません"),
         Permission::Granted => None,
     }
 }
