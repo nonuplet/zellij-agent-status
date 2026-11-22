@@ -5,16 +5,17 @@ use super::icon::IconStyle;
 use crate::model::{AgentState, AgentStatus};
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
+/// 各設定のユーザ向けの説明は README の「設定」にあり、ここには実装上の意味だけを書く。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewOptions {
+    /// 状態アイコンの種類。`nerd_font` による既定値の切り替えは config で済ませてある
     pub icons: IconStyle,
     /// 表示する `app`。None なら絞り込まない
     pub apps: Option<Vec<String>>,
     /// `app` を名前の候補にするか（名前の決まり方は `src/view/item.rs` の `Item::new` を参照）。
     /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
     pub show_app_name: bool,
-    /// タブ名を名前の候補にするか。タブバーなどでタブ名がすでに見えているときに、同じ情報を重ねないため。
-    /// 並び順と絞り込みには影響しない。
+    /// タブ名を名前の候補にするか。並び順と絞り込みには影響しない。
     pub show_tab_name: bool,
     /// `Blocked` のエージェントを先頭に並べるか（[`layout()`](super::layout::layout) の並べ替え）
     pub blocked_first: bool,
@@ -29,12 +30,12 @@ pub struct ViewOptions {
     /// Nerd Font モードのバッジの端の形。`nerd_font` が false なら使わない
     pub badge_shape: BadgeShape,
     /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
-    /// グリフが 1 桁からはみ出すかどうかはフォントと端末の組み合わせで変わり、プログラムからは判別できないため設定にしている。
+    /// グリフが 1 桁からはみ出すかどうかはプログラムからは判別できないため、設定にしている。
     pub nerd_font_icon_padding: bool,
-    /// 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色で塗って強調するか
+    /// 注意が必要な状態（[`AgentState::needs_attention`]）のエージェントを、1 つ分全体を状態の色で塗って強調するか
     pub highlight_attention: bool,
     /// 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコン（バッジにしない）では使わない。
-    /// アイコンがバッジの端で切れたり重なったりしないよう、既定で入れる（`src/view/badge.rs` を参照）
+    /// 既定で入れる理由は `src/view/badge.rs` を参照
     pub badge_name: bool,
     /// どのエージェントで msg を表示するか
     pub msg_mode: MsgMode,

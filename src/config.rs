@@ -1,47 +1,8 @@
 //! プラグイン設定（`load` に渡される configuration）の読み込み。
+//! キーの一覧と意味は README の「設定」にまとめている。ここには読み込みの規則だけを書く。
 //!
 //! Zellij はレイアウトの plugin ブロックの子ノードを、`名前 → 最初の値の文字列` のフラットな
 //! マップにして渡す（真偽値や数値も文字列になる）。そのため、設定はすべて文字列のキーと値で表す。
-//!
-//! ```kdl
-//! plugin location="file:zellij-agent-status.wasm" {
-//!     icon_style "alphabet"
-//!     apps "claude-code, codex"
-//!     show_app_name "false"
-//!     show_tab_name "false"
-//!     blocked_first "true"
-//!     max_length 40
-//!     show_cwd "true"
-//!     nerd_font "true"
-//!     badge_shape "round"
-//!     nerd_font_icon_padding "true"
-//!     highlight_attention "true"
-//!     badge_name "false"
-//!     msg_mode "all"
-//! }
-//! ```
-//!
-//! | キー | 既定値 | 内容 |
-//! |---|---|---|
-//! | `icon_style` | `symbol`（`nerd_font` が true なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか |
-//! | `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない |
-//! | `show_app_name` | `true` | `app` を名前の候補にするか |
-//! | `show_tab_name` | `true` | タブ名を名前の候補にするか |
-//! | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか。`false` なら (タブ, ペイン) の順のまま |
-//! | `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。[`MIN_MAX_LENGTH`] 以上の整数。`0` なら上限なし |
-//! | `show_cwd` | `false` | 名前の後ろに、ペインのカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか |
-//! | `nerd_font` | `false` | Nerd Font モード。バッジの端を `badge_shape` の形にし、`app` のアイコンを付け、`icon_style` の既定値を `nerd` にする |
-//! | `badge_shape` | `slash` | Nerd Font モードのバッジの端の形（`slash` / `arrow` / `round`）。`nerd_font` が false なら使わない |
-//! | `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。アイコンの右が切れたり隣と重なったりするフォント向け（`badge_name` が true なら、たいていは要らない） |
-//! | `highlight_attention` | `false` | `Blocked` / `Error` のエージェントを、1 つ分全体を状態の色で塗って強調するか |
-//! | `badge_name` | `true` | 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。`false` なら状態アイコンと進捗だけをバッジにする。`true` なら名前と msg の間の `: ` を空白にする（強調したエージェントを除く）。絵文字アイコンでは使わない |
-//! | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、`Blocked` / `Error` だけ（`attention`）、すべて（`all`）のどれか |
-//!
-//! 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が
-//! `false` ならタブ名 / `app` を飛ばす（`src/view/item.rs` の `Item::new`）。
-//!
-//! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
-//! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
 //!
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app_name false`）も
 //! 文字列（`show_app_name "false"`）も、Zellij からは同じ文字列で届く。
@@ -64,173 +25,124 @@ pub struct Config {
 
 impl Config {
     /// configuration から設定を作る。不正な値はそのキーだけ既定値にし、警告メッセージとして返す。
+    /// 警告は読んだ順に並ぶ（`main.rs` は先頭の 1 つだけを表示する）。
     pub fn from_configuration(configuration: &BTreeMap<String, String>) -> (Self, Vec<String>) {
         let mut config = Self::default();
-        let mut warnings = Vec::new();
+        let view = &mut config.view;
+        let mut r = Reader {
+            configuration,
+            warnings: Vec::new(),
+        };
 
         // icon_style の既定値が変わるので、icon_style より先に読む
-        if let Some(value) = configuration.get("nerd_font") {
-            match parse_bool(value) {
-                Some(nerd_font) => config.view.nerd_font = nerd_font,
-                None => warnings.push(format!(
-                    "nerd_font: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
+        r.read("nerd_font", &mut view.nerd_font, parse_bool);
+        if view.nerd_font {
+            view.icons = IconStyle::Nerd;
         }
-        if config.view.nerd_font {
-            config.view.icons = IconStyle::Nerd;
-        }
+        r.read("icon_style", &mut view.icons, choice(ICON_STYLES));
+        r.read("badge_shape", &mut view.badge_shape, choice(BADGE_SHAPES));
+        r.read("apps", &mut view.apps, |value| Ok(parse_apps(value)));
+        r.read("show_app_name", &mut view.show_app_name, parse_bool);
+        r.read("show_tab_name", &mut view.show_tab_name, parse_bool);
+        r.read("blocked_first", &mut view.blocked_first, parse_bool);
+        r.read("max_length", &mut view.max_length, parse_max_length);
+        r.read("show_cwd", &mut view.show_cwd, parse_bool);
+        r.read(
+            "highlight_attention",
+            &mut view.highlight_attention,
+            parse_bool,
+        );
+        r.read(
+            "nerd_font_icon_padding",
+            &mut view.nerd_font_icon_padding,
+            parse_bool,
+        );
+        r.read("badge_name", &mut view.badge_name, parse_bool);
+        r.read("msg_mode", &mut view.msg_mode, choice(MSG_MODES));
 
-        if let Some(value) = configuration.get("icon_style") {
-            match parse_icon_style(value) {
-                Some(icons) => config.view.icons = icons,
-                None => warnings.push(format!(
-                    "icon_style: `{value}` は使えません。`symbol`・`alphabet`・`emoji`・`nerd` のどれかを指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("badge_shape") {
-            match parse_badge_shape(value) {
-                Some(shape) => config.view.badge_shape = shape,
-                None => warnings.push(format!(
-                    "badge_shape: `{value}` は使えません。`slash`・`arrow`・`round` のどれかを指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("apps") {
-            config.view.apps = parse_apps(value);
-        }
-
-        if let Some(value) = configuration.get("show_app_name") {
-            match parse_bool(value) {
-                Some(show_app_name) => config.view.show_app_name = show_app_name,
-                None => warnings.push(format!(
-                    "show_app_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("show_tab_name") {
-            match parse_bool(value) {
-                Some(show_tab_name) => config.view.show_tab_name = show_tab_name,
-                None => warnings.push(format!(
-                    "show_tab_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("blocked_first") {
-            match parse_bool(value) {
-                Some(blocked_first) => config.view.blocked_first = blocked_first,
-                None => warnings.push(format!(
-                    "blocked_first: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("max_length") {
-            match parse_max_length(value) {
-                Some(max_length) => config.view.max_length = max_length,
-                None => warnings.push(format!(
-                    "max_length: `{value}` は使えません。0（上限なし）か {MIN_MAX_LENGTH} 以上の整数を指定してください（既定値 {DEFAULT_MAX_LENGTH} を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("show_cwd") {
-            match parse_bool(value) {
-                Some(show_cwd) => config.view.show_cwd = show_cwd,
-                None => warnings.push(format!(
-                    "show_cwd: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("highlight_attention") {
-            match parse_bool(value) {
-                Some(highlight) => config.view.highlight_attention = highlight,
-                None => warnings.push(format!(
-                    "highlight_attention: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("nerd_font_icon_padding") {
-            match parse_bool(value) {
-                Some(padding) => config.view.nerd_font_icon_padding = padding,
-                None => warnings.push(format!(
-                    "nerd_font_icon_padding: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("badge_name") {
-            match parse_bool(value) {
-                Some(badge_name) => config.view.badge_name = badge_name,
-                None => warnings.push(format!(
-                    "badge_name: `{value}` は使えません。`true` か `false` を指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        if let Some(value) = configuration.get("msg_mode") {
-            match parse_msg_mode(value) {
-                Some(msg_mode) => config.view.msg_mode = msg_mode,
-                None => warnings.push(format!(
-                    "msg_mode: `{value}` は使えません。`none`・`attention`・`all` のどれかを指定してください（既定値を使います）"
-                )),
-            }
-        }
-
-        (config, warnings)
+        (config, r.warnings)
     }
 }
 
-/// 0 は上限なし（`Some(None)`）。不正な値は None。
+/// configuration から 1 キーずつ読み、不正な値の警告を積む。
+struct Reader<'a> {
+    configuration: &'a BTreeMap<String, String>,
+    warnings: Vec<String>,
+}
+
+impl Reader<'_> {
+    /// `key` の値があれば `parse` して `target` に入れる。キーがなければ何もしない。
+    /// 不正なら `target` は既定値のままにし、`parse` が返した案内（何を指定すべきか）を付けて警告を積む。
+    fn read<T>(&mut self, key: &str, target: &mut T, parse: impl Fn(&str) -> Result<T, String>) {
+        let Some(value) = self.configuration.get(key) else {
+            return;
+        };
+        match parse(value) {
+            Ok(parsed) => *target = parsed,
+            Err(guidance) => self
+                .warnings
+                .push(format!("{key}: `{value}` は使えません。{guidance}")),
+        }
+    }
+}
+
+/// 警告文の案内のうち、既定値に戻す設定で共通の形。`expected` は指定できる値の説明
+fn guidance(expected: &str) -> String {
+    format!("{expected}を指定してください（既定値を使います）")
+}
+
+fn parse_bool(value: &str) -> Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(guidance("`true` か `false` ")),
+    }
+}
+
+const ICON_STYLES: &[(&str, IconStyle)] = &[
+    ("symbol", IconStyle::Symbol),
+    ("alphabet", IconStyle::Alphabet),
+    ("emoji", IconStyle::Emoji),
+    ("nerd", IconStyle::Nerd),
+];
+
+const BADGE_SHAPES: &[(&str, BadgeShape)] = &[
+    ("slash", BadgeShape::Slash),
+    ("arrow", BadgeShape::Arrow),
+    ("round", BadgeShape::Round),
+];
+
+const MSG_MODES: &[(&str, MsgMode)] = &[
+    ("none", MsgMode::None),
+    ("attention", MsgMode::Attention),
+    ("all", MsgMode::All),
+];
+
+/// 列挙型の設定の parse。受け付ける値と、警告文の「どれか」の一覧を、どちらも `table` から作る
+/// （別々に書くと、片方だけ直したときに案内と実際に受け付ける値がずれるため）。
+fn choice<T: Copy>(table: &'static [(&'static str, T)]) -> impl Fn(&str) -> Result<T, String> {
+    move |value| {
+        table
+            .iter()
+            .find(|(name, _)| *name == value)
+            .map(|&(_, parsed)| parsed)
+            .ok_or_else(|| {
+                let names: Vec<String> =
+                    table.iter().map(|(name, _)| format!("`{name}`")).collect();
+                guidance(&format!("{} のどれか", names.join("・")))
+            })
+    }
+}
+
+/// 0 は上限なし（`Ok(None)`）。
 /// 1 以上 [`MIN_MAX_LENGTH`] 未満は、アイコンと進捗だけで上限を超えることがあるので受け付けない。
-fn parse_max_length(value: &str) -> Option<Option<usize>> {
-    match value.parse().ok()? {
-        0 => Some(None),
-        max_length if max_length >= MIN_MAX_LENGTH => Some(Some(max_length)),
-        _ => None,
-    }
-}
-
-fn parse_bool(value: &str) -> Option<bool> {
-    match value {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
-}
-
-fn parse_icon_style(value: &str) -> Option<IconStyle> {
-    match value {
-        "symbol" => Some(IconStyle::Symbol),
-        "alphabet" => Some(IconStyle::Alphabet),
-        "emoji" => Some(IconStyle::Emoji),
-        "nerd" => Some(IconStyle::Nerd),
-        _ => None,
-    }
-}
-
-fn parse_badge_shape(value: &str) -> Option<BadgeShape> {
-    match value {
-        "slash" => Some(BadgeShape::Slash),
-        "arrow" => Some(BadgeShape::Arrow),
-        "round" => Some(BadgeShape::Round),
-        _ => None,
-    }
-}
-
-fn parse_msg_mode(value: &str) -> Option<MsgMode> {
-    match value {
-        "none" => Some(MsgMode::None),
-        "attention" => Some(MsgMode::Attention),
-        "all" => Some(MsgMode::All),
-        _ => None,
+fn parse_max_length(value: &str) -> Result<Option<usize>, String> {
+    match value.parse() {
+        Ok(0) => Ok(None),
+        Ok(max_length) if max_length >= MIN_MAX_LENGTH => Ok(Some(max_length)),
+        _ => Err(format!(
+            "0（上限なし）か {MIN_MAX_LENGTH} 以上の整数を指定してください（既定値 {DEFAULT_MAX_LENGTH} を使います）"
+        )),
     }
 }
 
@@ -255,6 +167,20 @@ mod tests {
             .collect()
     }
 
+    type Field = fn(&ViewOptions) -> bool;
+
+    /// 真偽値の設定と、そのフィールド
+    const BOOL_KEYS: &[(&str, Field)] = &[
+        ("nerd_font", |view| view.nerd_font),
+        ("show_app_name", |view| view.show_app_name),
+        ("show_tab_name", |view| view.show_tab_name),
+        ("blocked_first", |view| view.blocked_first),
+        ("show_cwd", |view| view.show_cwd),
+        ("highlight_attention", |view| view.highlight_attention),
+        ("nerd_font_icon_padding", |view| view.nerd_font_icon_padding),
+        ("badge_name", |view| view.badge_name),
+    ];
+
     #[test]
     fn empty_configuration_gives_defaults() {
         let (config, warnings) = Config::from_configuration(&BTreeMap::new());
@@ -275,6 +201,89 @@ mod tests {
     }
 
     #[test]
+    fn bool_keys() {
+        for &(key, field) in BOOL_KEYS {
+            for (value, expected) in [("true", true), ("false", false)] {
+                let (config, warnings) =
+                    Config::from_configuration(&configuration(&[(key, value)]));
+                assert!(warnings.is_empty(), "{key} {value}");
+                assert_eq!(field(&config.view), expected, "{key} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_bool_falls_back_to_default_with_warning() {
+        let default = ViewOptions::default();
+        for &(key, field) in BOOL_KEYS {
+            for value in ["yes", "True", "1", "no", "False", "0", ""] {
+                let (config, warnings) =
+                    Config::from_configuration(&configuration(&[(key, value), ("apps", "claude")]));
+                assert_eq!(field(&config.view), field(&default), "{key} {value}");
+                // 他のキーは影響を受けない
+                assert_eq!(
+                    config.view.apps,
+                    Some(vec!["claude".to_string()]),
+                    "{key} {value}"
+                );
+                assert_eq!(warnings.len(), 1, "{key} {value}");
+                assert!(warnings[0].starts_with(&format!("{key}:")), "{key} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn warning_messages() {
+        let cases = [
+            (
+                "show_cwd",
+                "yes",
+                "show_cwd: `yes` は使えません。`true` か `false` を指定してください（既定値を使います）",
+            ),
+            (
+                "icon_style",
+                "emoticon",
+                "icon_style: `emoticon` は使えません。`symbol`・`alphabet`・`emoji`・`nerd` のどれかを指定してください（既定値を使います）",
+            ),
+            (
+                "badge_shape",
+                ">",
+                "badge_shape: `>` は使えません。`slash`・`arrow`・`round` のどれかを指定してください（既定値を使います）",
+            ),
+            (
+                "msg_mode",
+                "blocked",
+                "msg_mode: `blocked` は使えません。`none`・`attention`・`all` のどれかを指定してください（既定値を使います）",
+            ),
+            (
+                "max_length",
+                "17",
+                "max_length: `17` は使えません。0（上限なし）か 18 以上の整数を指定してください（既定値 50 を使います）",
+            ),
+        ];
+        for (key, value, expected) in cases {
+            let (_, warnings) = Config::from_configuration(&configuration(&[(key, value)]));
+            assert_eq!(warnings, [expected], "{key} {value}");
+        }
+    }
+
+    #[test]
+    fn warnings_keep_reading_order() {
+        // main.rs は先頭の警告だけを表示するので、順番も変えない
+        let (_, warnings) = Config::from_configuration(&configuration(&[
+            ("msg_mode", "x"),
+            ("max_length", "x"),
+            ("icon_style", "x"),
+            ("nerd_font", "x"),
+        ]));
+        let keys: Vec<&str> = warnings
+            .iter()
+            .map(|w| w.split(':').next().unwrap())
+            .collect();
+        assert_eq!(keys, ["nerd_font", "icon_style", "max_length", "msg_mode"]);
+    }
+
+    #[test]
     fn nerd_font_switches_default_icon_style() {
         let (config, warnings) =
             Config::from_configuration(&configuration(&[("nerd_font", "true")]));
@@ -287,6 +296,14 @@ mod tests {
         assert!(warnings.is_empty());
         assert!(!config.view.nerd_font);
         assert_eq!(config.view.icons, IconStyle::Symbol);
+    }
+
+    #[test]
+    fn invalid_nerd_font_keeps_default_icon_style() {
+        for value in ["yes", "True", "1", ""] {
+            let (config, _) = Config::from_configuration(&configuration(&[("nerd_font", value)]));
+            assert_eq!(config.view.icons, IconStyle::Symbol, "{value}");
+        }
     }
 
     #[test]
@@ -319,19 +336,32 @@ mod tests {
     }
 
     #[test]
-    fn invalid_nerd_font_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("nerd_font", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(!config.view.nerd_font, "{value}");
-            assert_eq!(config.view.icons, IconStyle::Symbol, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("nerd_font:"), "{value}");
+    fn icon_style() {
+        let cases = [
+            ("symbol", IconStyle::Symbol),
+            ("alphabet", IconStyle::Alphabet),
+            ("emoji", IconStyle::Emoji),
+            ("nerd", IconStyle::Nerd),
+        ];
+        for (value, expected) in cases {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("icon_style", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view.icons, expected, "{value}");
         }
+    }
+
+    #[test]
+    fn unknown_icon_style_falls_back_to_default_with_warning() {
+        let (config, warnings) = Config::from_configuration(&configuration(&[
+            ("icon_style", "emoticon"),
+            ("apps", "claude"),
+        ]));
+        assert_eq!(config.view.icons, IconStyle::Symbol);
+        // 他のキーは影響を受けない
+        assert_eq!(config.view.apps, Some(vec!["claude".to_string()]));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].starts_with("icon_style:"));
     }
 
     #[test]
@@ -367,41 +397,6 @@ mod tests {
     }
 
     #[test]
-    fn blocked_first() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("blocked_first", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.blocked_first, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn show_cwd() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("show_cwd", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.show_cwd, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_blocked_first_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("blocked_first", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(!config.view.blocked_first, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("blocked_first:"), "{value}");
-        }
-    }
-
-    #[test]
     fn max_length() {
         let cases = [("40", Some(40)), ("18", Some(MIN_MAX_LENGTH)), ("0", None)];
         for (value, expected) in cases {
@@ -428,99 +423,6 @@ mod tests {
             );
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("max_length:"), "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_show_cwd_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("show_cwd", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(!config.view.show_cwd, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("show_cwd:"), "{value}");
-        }
-    }
-
-    #[test]
-    fn nerd_font_icon_padding() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("nerd_font_icon_padding", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.nerd_font_icon_padding, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_nerd_font_icon_padding_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("nerd_font_icon_padding", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(!config.view.nerd_font_icon_padding, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(
-                warnings[0].starts_with("nerd_font_icon_padding:"),
-                "{value}"
-            );
-        }
-    }
-
-    #[test]
-    fn highlight_attention() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("highlight_attention", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.highlight_attention, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_highlight_attention_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("highlight_attention", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(!config.view.highlight_attention, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("highlight_attention:"), "{value}");
-        }
-    }
-
-    #[test]
-    fn badge_name() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("badge_name", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.badge_name, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_badge_name_falls_back_to_default_with_warning() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("badge_name", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(config.view.badge_name, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("badge_name:"), "{value}");
         }
     }
 
@@ -552,89 +454,6 @@ mod tests {
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("msg_mode:"), "{value}");
         }
-    }
-
-    #[test]
-    fn show_app_name() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("show_app_name", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.show_app_name, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_show_app_name_falls_back_to_default_with_warning() {
-        for value in ["no", "False", "0", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("show_app_name", value),
-                ("apps", "claude"),
-            ]));
-            assert!(config.view.show_app_name, "{value}");
-            // 他のキーは影響を受けない
-            assert_eq!(
-                config.view.apps,
-                Some(vec!["claude".to_string()]),
-                "{value}"
-            );
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("show_app_name:"), "{value}");
-        }
-    }
-
-    #[test]
-    fn show_tab_name() {
-        for (value, expected) in [("true", true), ("false", false)] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("show_tab_name", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.show_tab_name, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn invalid_show_tab_name_falls_back_to_default_with_warning() {
-        for value in ["no", "False", "0", ""] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("show_tab_name", value),
-                ("show_app_name", "false"),
-            ]));
-            assert!(config.view.show_tab_name, "{value}");
-            // 他のキーは影響を受けない
-            assert!(!config.view.show_app_name, "{value}");
-            assert_eq!(warnings.len(), 1, "{value}");
-            assert!(warnings[0].starts_with("show_tab_name:"), "{value}");
-        }
-    }
-
-    #[test]
-    fn icon_style() {
-        let cases = [
-            ("symbol", IconStyle::Symbol),
-            ("alphabet", IconStyle::Alphabet),
-            ("emoji", IconStyle::Emoji),
-            ("nerd", IconStyle::Nerd),
-        ];
-        for (value, expected) in cases {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("icon_style", value)]));
-            assert!(warnings.is_empty(), "{value}");
-            assert_eq!(config.view.icons, expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn unknown_icon_style_falls_back_to_default_with_warning() {
-        let (config, warnings) = Config::from_configuration(&configuration(&[
-            ("icon_style", "emoticon"),
-            ("apps", "claude"),
-        ]));
-        assert_eq!(config.view.icons, IconStyle::Symbol);
-        // 他のキーは影響を受けない
-        assert_eq!(config.view.apps, Some(vec!["claude".to_string()]));
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].starts_with("icon_style:"));
     }
 
     #[test]
