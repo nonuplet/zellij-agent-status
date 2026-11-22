@@ -1,23 +1,18 @@
 //! 幅の割り当て：各エージェントの名前・cwd・msg を、どの幅まで表示するかを決める。
 //!
 //! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
-//!
-//! [`ViewOptions::max_length`](super::ViewOptions::max_length) を指定しているときは、まず 1 エージェント分
-//! （アイコン・進捗を含む）をその幅に収める（[`Item::widths`]）。msg を切り詰め、[`MIN_MSG_WIDTH`] を
-//! 下回るなら msg を省いて cwd を切り詰め、[`MIN_CWD_WIDTH`] を下回るなら cwd も省いて名前を切り詰める。
-//!
-//! そのうえで行の幅が足りないときは、次の順に縮める（[`plan`]）。
-//! 1. msg を各エージェントで均等に切り詰める
-//! 2. msg を省き、cwd を均等に切り詰める
-//! 3. cwd を省き、名前を均等に切り詰める
+//! 幅が足りないときは、次の順に縮める（[`shrink`]）。
+//! 1. msg を各エージェントで均等に切り詰める（[`MIN_MSG_WIDTH`] を下回るなら次へ）
+//! 2. msg を省き、cwd を均等に切り詰める（[`MIN_CWD_WIDTH`] を下回るなら次へ）
+//! 3. cwd を省き、名前を均等に切り詰める（[`MIN_NAME_WIDTH`] を下回るなら次へ）
 //! 4. 状態アイコン（と進捗）だけにする
 //! 5. それでも収まらなければ、行の末尾を切る（[`clamp`](super::text::clamp)。末尾の
 //!    [`ELLIPSIS`](super::text::ELLIPSIS) は切れた部分と同じ背景で塗る）
+//!
+//! [`ViewOptions::max_length`](super::ViewOptions::max_length) を指定しているときは、まず 1 エージェント分
+//! （アイコン・進捗を含む）ずつ同じ手順でその幅に収め、そのうえで行の幅に収める（[`plan`]）。
 
-use unicode_width::UnicodeWidthStr;
-
-use super::item::{CWD_OVERHEAD, Item};
-use super::layout::PAD;
+use super::item::{Item, Widths};
 
 /// 切り詰めた msg / cwd / 名前がこの幅を下回るなら、切り詰めずに次の段階へ進む
 pub(super) const MIN_MSG_WIDTH: usize = 6;
@@ -34,117 +29,116 @@ pub(super) const MIN_NAME_WIDTH: usize = 4;
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
 /// - アイコンと進捗だけで上限を超えることがある（例：Nerd Font モードのバッジ + ` 100%` で 10）
-/// - 上限に収めるために、名前が [`MIN_NAME_WIDTH`] より短く切り詰められて見分けられなくなる
+/// - 上限に収めるために名前を省くことになり、エージェントを見分けられなくなる
 pub const MIN_MAX_LENGTH: usize = 18;
 
-/// 各部分を表示する幅の上限。None なら表示しない。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Widths {
-    pub(super) name: Option<usize>,
-    pub(super) cwd: Option<usize>,
-    pub(super) msg: Option<usize>,
-}
-
 /// 各エージェントの各部分の幅を決める（縮める順はモジュールの説明を参照）。
-/// [`Item::widths`] で `max_length` に収めた幅を、行の幅に合わせてさらに縮める。
-/// `sep_width` はエージェント同士の区切りの幅。
+/// `line_overhead` は行頭の余白とエージェント同士の区切りの幅の合計。
 pub(super) fn plan(
     items: &[Item],
     cols: usize,
-    sep_width: usize,
+    line_overhead: usize,
     max_length: Option<usize>,
 ) -> Vec<Widths> {
-    let fixed = PAD.width()
-        + sep_width * (items.len() - 1)
-        + items.iter().map(Item::head_width).sum::<usize>();
-    let caps: Vec<Widths> = items.iter().map(|i| i.widths(max_length)).collect();
-    // 名前は常に表示する前提（Item::widths で常に Some）
-    let names = shown(&caps, |w| w.name);
-    // 名前の前の空白と後ろの app のアイコン
-    let names_overhead = items.iter().map(Item::name_overhead).sum::<usize>();
-    let names_total = names.iter().sum::<usize>() + names_overhead;
-    let cwds = shown(&caps, |w| w.cwd);
-    let cwds_overhead = CWD_OVERHEAD * cwds.len();
-    let cwds_total = cwds.iter().sum::<usize>() + cwds_overhead;
-    let msgs = shown(&caps, |w| w.msg);
-    // 区切り（Item::msg_separator）の幅はエージェントごとに違うので、msg を表示するものだけ足す
-    let msgs_overhead = items
+    let caps: Vec<Widths> = items
         .iter()
-        .zip(&caps)
-        .filter(|(_, cap)| cap.msg.is_some())
-        .map(|(item, _)| item.msg_separator().width())
-        .sum::<usize>();
+        .map(|item| match max_length {
+            Some(max_length) => shrink(std::slice::from_ref(item), &[item.widths()], max_length)[0],
+            None => item.widths(),
+        })
+        .collect();
+    match cols.checked_sub(line_overhead) {
+        Some(room) => shrink(items, &caps, room),
+        None => vec![Widths::default(); items.len()],
+    }
+}
 
-    if let Some(room) = cols.checked_sub(fixed + names_total + cwds_total + msgs_overhead)
+/// 各エージェントの各部分の幅の上限（`caps`）を、合計が `room` に収まるように縮める。
+fn shrink(items: &[Item], caps: &[Widths], room: usize) -> Vec<Widths> {
+    let names: Vec<Option<usize>> = caps.iter().map(|w| w.name).collect();
+    let cwds: Vec<Option<usize>> = caps.iter().map(|w| w.cwd).collect();
+    let msgs: Vec<Option<usize>> = caps.iter().map(|w| w.msg).collect();
+    let hidden = vec![None; items.len()];
+
+    let heads = items.iter().map(Item::head_width).sum::<usize>();
+    let names_overhead = overhead(items, &names, Item::name_overhead);
+    let names_total = total(&names) + names_overhead;
+    let cwds_overhead = overhead(items, &cwds, Item::cwd_overhead);
+    let cwds_total = total(&cwds) + cwds_overhead;
+    let msgs_overhead = overhead(items, &msgs, Item::msg_overhead);
+
+    if let Some(room) = room.checked_sub(heads + names_total + cwds_total + msgs_overhead)
         && let Some(msgs) = fit(&msgs, room, MIN_MSG_WIDTH)
     {
-        return assemble(&caps, Some(names), Some(cwds), Some(msgs));
+        return zip(names, cwds, msgs);
     }
-
-    if let Some(room) = cols.checked_sub(fixed + names_total + cwds_overhead)
+    if let Some(room) = room.checked_sub(heads + names_total + cwds_overhead)
         && let Some(cwds) = fit(&cwds, room, MIN_CWD_WIDTH)
     {
-        return assemble(&caps, Some(names), Some(cwds), None);
+        return zip(names, cwds, hidden);
     }
-
-    if let Some(room) = cols.checked_sub(fixed + names_overhead)
+    if let Some(room) = room.checked_sub(heads + names_overhead)
         && let Some(names) = fit(&names, room, MIN_NAME_WIDTH)
     {
-        return assemble(&caps, Some(names), None, None);
+        return zip(names, hidden.clone(), hidden);
     }
-
-    assemble(&caps, None, None, None)
+    vec![Widths::default(); items.len()]
 }
 
-/// `part` を表示するエージェントについての、その幅の一覧。
-fn shown(caps: &[Widths], part: impl Fn(&Widths) -> Option<usize>) -> Vec<usize> {
-    caps.iter().filter_map(part).collect()
+/// 表示する（Some の）部分の幅の合計
+fn total(widths: &[Option<usize>]) -> usize {
+    widths.iter().flatten().sum()
 }
 
-/// [`plan`] の各段階の結果を、エージェントごとの [`Widths`] にする。
-/// `names` / `cwds` / `msgs` は、`caps`（[`Item::widths`] の結果）でその部分を表示するエージェントの分だけを並べたもの。
-/// None はその部分を表示しない。
-fn assemble(
-    caps: &[Widths],
-    names: Option<Vec<usize>>,
-    cwds: Option<Vec<usize>>,
-    msgs: Option<Vec<usize>>,
+/// 表示する（Some の）部分に付く部分（`overhead`）の幅の合計
+fn overhead(items: &[Item], widths: &[Option<usize>], overhead: fn(&Item) -> usize) -> usize {
+    items
+        .iter()
+        .zip(widths)
+        .filter(|(_, width)| width.is_some())
+        .map(|(item, _)| overhead(item))
+        .sum()
+}
+
+fn zip(
+    names: Vec<Option<usize>>,
+    cwds: Vec<Option<usize>>,
+    msgs: Vec<Option<usize>>,
 ) -> Vec<Widths> {
-    let mut names = names.map(Vec::into_iter);
-    let mut cwds = cwds.map(Vec::into_iter);
-    let mut msgs = msgs.map(Vec::into_iter);
-    let next = |cap: Option<usize>, shares: &mut Option<std::vec::IntoIter<usize>>| {
-        cap.and_then(|_| shares.as_mut().and_then(Iterator::next))
-    };
-    caps.iter()
-        .map(|cap| Widths {
-            name: next(cap.name, &mut names),
-            cwd: next(cap.cwd, &mut cwds),
-            msg: next(cap.msg, &mut msgs),
-        })
+    names
+        .into_iter()
+        .zip(cwds)
+        .zip(msgs)
+        .map(|((name, cwd), msg)| Widths { name, cwd, msg })
         .collect()
 }
 
 /// `room` を [`fair_share`] で分け、切り詰めた結果が `min` を下回るものがあれば None。
-fn fit(widths: &[usize], room: usize, min: usize) -> Option<Vec<usize>> {
+fn fit(widths: &[Option<usize>], room: usize, min: usize) -> Option<Vec<Option<usize>>> {
     let shares = fair_share(widths, room);
+    // Some の位置は widths と shares で同じ
     let ok = widths
         .iter()
-        .zip(&shares)
+        .flatten()
+        .zip(shares.iter().flatten())
         .all(|(&width, &share)| share >= width || share >= min);
     ok.then_some(shares)
 }
 
-/// 合計 `total` の幅を、各要素の幅（`widths`）を上限として均等に分ける。
-/// 短いものに余った分は、長いものに回す。
-fn fair_share(widths: &[usize], total: usize) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..widths.len()).collect();
-    order.sort_by_key(|&i| widths[i]);
-    let mut shares = vec![0; widths.len()];
+/// 合計 `total` の幅を、表示する（Some の）要素に、その幅を上限として均等に分ける。
+/// 短いものに余った分は、長いものに回す。None の要素は None のまま。
+fn fair_share(widths: &[Option<usize>], total: usize) -> Vec<Option<usize>> {
+    let mut shown: Vec<(usize, usize)> = widths
+        .iter()
+        .enumerate()
+        .filter_map(|(i, width)| width.map(|w| (i, w)))
+        .collect();
+    shown.sort_by_key(|&(_, width)| width);
+    let mut shares = vec![None; widths.len()];
     let mut left = total;
-    for (k, &i) in order.iter().enumerate() {
-        let share = (left / (order.len() - k)).min(widths[i]);
-        shares[i] = share;
+    for (k, &(i, width)) in shown.iter().enumerate() {
+        let share = (left / (shown.len() - k)).min(width);
+        shares[i] = Some(share);
         left -= share;
     }
     shares
@@ -156,8 +150,20 @@ mod tests {
 
     #[test]
     fn fair_share_gives_leftover_to_longer_items() {
-        assert_eq!(fair_share(&[3, 20, 20], 20), vec![3, 8, 9]);
-        assert_eq!(fair_share(&[3, 4], 100), vec![3, 4]);
-        assert_eq!(fair_share(&[], 10), Vec::<usize>::new());
+        assert_eq!(
+            fair_share(&[Some(3), Some(20), Some(20)], 20),
+            vec![Some(3), Some(8), Some(9)]
+        );
+        assert_eq!(fair_share(&[Some(3), Some(4)], 100), vec![Some(3), Some(4)]);
+        assert_eq!(fair_share(&[], 10), Vec::<Option<usize>>::new());
+    }
+
+    #[test]
+    fn fair_share_skips_hidden_items() {
+        assert_eq!(
+            fair_share(&[Some(20), None, Some(3), None, Some(20)], 20),
+            vec![Some(8), None, Some(3), None, Some(9)]
+        );
+        assert_eq!(fair_share(&[None, None], 10), vec![None, None]);
     }
 }

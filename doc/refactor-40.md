@@ -241,7 +241,8 @@ for (part, in_badge) in parts {
 enum BadgeExtent { None, Head, Label, Whole }
 ```
 
-- 2-2 の `BadgeStyle::new` で一度だけ計算し、`spans` では `i == extent.len()` の位置で右端を差し込む。
+- 2-2 の `BadgeStyle::new` で一度だけ計算し、`spans` では先頭から `extent.parts()` 個の部分の直後に右端を差し込む。
+  - メソッド名は `len` ではなく `parts` にした。`len` だと clippy の `len_without_is_empty` の対象になる名前で、部分の数を表していることも伝わりにくいため。
 - 絵文字アイコンでの強調（端の文字なしで全体を塗る）は、`ends: None` と `extent: Whole` の組み合わせで表す。
 - `Item` の bool のフィールドを減らす。
 
@@ -263,7 +264,7 @@ enum BadgeExtent { None, Head, Label, Whole }
 
 ```rust
 if let Some(msgs) = fit(&caps.msg, room, MIN_MSG_WIDTH) {
-    return Widths::zip(names, cwds, msgs);
+    return zip(names, cwds, msgs);
 }
 ```
 

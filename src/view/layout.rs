@@ -6,13 +6,14 @@
 use unicode_width::UnicodeWidthStr;
 
 use super::ViewOptions;
+use super::badge::BadgeStyle;
 use super::fit::plan;
 use super::item::Item;
 use super::span::{Role, Span};
 use super::text::clamp;
 use crate::model::{AgentState, AgentStatus};
 
-/// 行頭の余白
+/// 行頭の余白（[`render_message`](super::render_message) でも使う）
 pub(super) const PAD: &str = " ";
 /// エージェント同士の区切り。Nerd Font モードでも同じ（エージェントの境目はバッジで見分けられるため）
 const SEPARATOR: &str = "  ";
@@ -34,13 +35,18 @@ pub(super) fn layout<'a>(
         let blocked = options.blocked_first && a.state == AgentState::Blocked;
         (!blocked, a.tab, a.pane_id)
     });
-    let items: Vec<Item> = agents.into_iter().map(|a| Item::new(a, options)).collect();
+    let style = BadgeStyle::new(options);
+    let items: Vec<Item> = agents
+        .into_iter()
+        .map(|a| Item::new(a, options, &style))
+        .collect();
     if items.is_empty() {
         return vec![];
     }
 
     let mut spans = vec![Span::new(PAD, Role::Plain)];
-    let plans = plan(&items, cols, SEPARATOR.width(), options.max_length);
+    let line_overhead = PAD.width() + SEPARATOR.width() * (items.len() - 1);
+    let plans = plan(&items, cols, line_overhead, options.max_length);
     for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {
             spans.push(Span::new(SEPARATOR, Role::Plain));

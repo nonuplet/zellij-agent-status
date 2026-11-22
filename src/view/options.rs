@@ -6,6 +6,8 @@ use crate::model::{AgentState, AgentStatus};
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
 /// 各設定のユーザ向けの説明は README の「設定」にあり、ここには実装上の意味だけを書く。
+/// バッジ・アイコンに関わる設定は互いに依存するので、view では直接読まず、
+/// [`BadgeStyle`](super::badge::BadgeStyle) で組み合わせを解決してから使う。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewOptions {
     /// 状態アイコンの種類。`nerd_font` による既定値の切り替えは config で済ませてある

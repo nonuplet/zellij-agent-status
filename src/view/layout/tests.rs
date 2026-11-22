@@ -1087,7 +1087,7 @@ fn badge_name_puts_truncated_name_into_badge() {
 
 #[test]
 fn badge_name_only_moves_badge_end_without_msg() {
-    // msg があると区切り（Item::msg_separator）の幅も変わるので、msg のないエージェントで確かめる
+    // msg があると区切り（BadgeExtent::msg_separator）の幅も変わるので、msg のないエージェントで確かめる
     let mut agents = mixed_agents();
     for a in &mut agents {
         a.msg = None;

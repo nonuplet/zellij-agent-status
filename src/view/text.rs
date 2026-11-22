@@ -4,7 +4,7 @@ use std::path::Path;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::span::{Fill, Role, Span};
+use super::span::{Fill, Role, Span, width};
 
 /// 切り詰めたことを示す記号。
 /// `…`（U+2026）は East Asian Width が Ambiguous で、端末によっては 2 桁になるため使わない。
@@ -58,8 +58,10 @@ pub(super) fn truncate(text: &str, width: usize) -> String {
 /// 行全体が `cols` に収まらなければ、末尾を切って [`ELLIPSIS`] を付ける。
 /// [`ELLIPSIS`] は切れた Span と同じ背景で塗る。バッジの途中で切れたときは、バッジの色の塊が
 /// [`ELLIPSIS`] で終わる（右端の文字は付けない）ので、続きがあると分かる。
+///
+/// 切り詰めた Span は、文字列以外のフィールドを元の Span から引き継ぐ。
 pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
-    if spans.iter().map(|s| s.text.width()).sum::<usize>() <= cols {
+    if width(&spans) <= cols {
         return spans;
     }
     if cols == 0 {
@@ -70,14 +72,14 @@ pub(super) fn clamp(spans: Vec<Span>, cols: usize) -> Vec<Span> {
     let mut fill = Fill::None;
     for span in spans {
         let text = take_width(&span.text, left);
-        let width = text.width();
         let cut = text.len() < span.text.len();
+        left -= text.width();
+        let span_fill = span.fill;
         if !text.is_empty() {
-            out.push(Span::new(text, span.role).with_fill(span.fill));
+            out.push(Span { text, ..span });
         }
-        left -= width;
         if cut {
-            fill = span.fill;
+            fill = span_fill;
             break;
         }
     }

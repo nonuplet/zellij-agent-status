@@ -1,5 +1,7 @@
 //! 描画の中間表現：[`layout`](mod@super::layout) が作り、[`paint`](mod@super::paint) が色を付ける Span。
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::model::AgentState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,4 +49,9 @@ impl Span {
         self.fill = fill;
         self
     }
+}
+
+/// Span 列の表示幅
+pub(super) fn width(spans: &[Span]) -> usize {
+    spans.iter().map(|s| s.text.width()).sum()
 }
