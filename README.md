@@ -8,8 +8,26 @@ OSC 7501 を読んでステータスの情報を取得します。Zellij 0.46 �
 
 - Claude Code（最新版）は自分で OSC 7501 を送るので、hooks などの設定なしで表示されます。エージェントごとの挙動は `doc/agent-behaviors.md` を参照してください。
 - 手動で送るときは `scripts/osc7501.sh` を使います。
-- 初回の起動時は、プラグインのペインに permission（`ReadApplicationState` と `ChangeApplicationState`）の確認が出ます。1 行のペインなので全文は読めませんが、ペインをクリックしてフォーカスし、許可してください。許可するまでエージェントの状態は表示されません。
+- 初回の起動時は、プラグインのペインに permission（`ReadApplicationState`・`ChangeApplicationState`・`InterceptInput`）の確認が出ます。1 行のペインなので全文は読めませんが、ペインをクリックしてフォーカスし、許可してください。許可するまでエージェントの状態は表示されません。
 - 並んでいるエージェントをクリックすると、そのエージェントのペインにフォーカスが移ります。ペインが別のタブにあれば、そのタブに切り替わります。
+- キー操作でも選べます（キーバインドの設定が必要です。次の「選択モードのキー」を参照）。選択モードに入り、`←` / `→`（`h` / `l`）で選んで `Enter` でそのペインにフォーカスします。`Esc`（`Ctrl c`）で何もせずに抜けます。選択モード中に行をクリックしたり、ほかのペインやタブにフォーカスが移ったりしたときも抜けます。
+
+### 選択モードのキー
+
+プラグインはキーを登録しません。`config.kdl` の `keybinds` に、パイプ（`MessagePlugin`）で `zellij-agent-status::select` を送るキーを書いてください。次の例では `Ctrl t`（tab モード）→ `a` で選択モードに入ります（tab モードの `a` は、default / unlock-first のどちらのプリセットでも使われていません）。
+
+```kdl
+keybinds {
+    tab {
+        bind "a" {
+            MessagePlugin { name "zellij-agent-status::select"; }
+            SwitchToMode "Normal"; // unlock-first のプリセットなら "Locked"
+        }
+    }
+}
+```
+
+パイプは `name` だけを指定し、`plugin` に URL は書かないでください。URL を書くと、設定値の違いなどで別のインスタンスが起動することがあります。
 
 ## 設定
 

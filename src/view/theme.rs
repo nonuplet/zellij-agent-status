@@ -63,6 +63,9 @@ impl fmt::Display for Sgr {
 pub struct Theme {
     pub fg: Color,
     pub bg: Color,
+    /// 選択モード中に、行全体（バッジ以外）に使う文字色と背景色。行全体の色を変えて選択モードだと分かるようにする
+    pub select_fg: Color,
+    pub select_bg: Color,
     pub idle: Color,
     pub working: Color,
     pub blocked: Color,
@@ -73,11 +76,23 @@ pub struct Theme {
 impl Theme {
     /// 色の対応は zellij-utils の `From<Palette> for Styling` を参照
     /// （`text_unselected` の emphasis_0〜2 がそれぞれ orange / cyan / green、`exit_code_error.base` が red）。
+    ///
+    /// 選択モードの色は `text_selected` の組を使う。文字色と emphasis（状態の色）が `text_unselected` と同じ組なので、
+    /// 背景だけを替えても今と同じ色で読める。`text_selected.background` が普段の背景と同じ色のテーマ
+    /// （`palette.bg` と `palette.black` が同じとき）では変化が見えないので、`ribbon_unselected` の組を使う。
+    /// こちらは status-bar と同じ色で、状態の色がその上で読める保証はない。
     pub fn from_styling(styling: &Styling) -> Self {
         let text = &styling.text_unselected;
+        let select = if styling.text_selected.background == text.background {
+            &styling.ribbon_unselected
+        } else {
+            &styling.text_selected
+        };
         Theme {
             fg: text.base.into(),
             bg: text.background.into(),
+            select_fg: select.base.into(),
+            select_bg: select.background.into(),
             idle: text.base.into(),
             working: text.emphasis_1.into(),
             blocked: text.emphasis_0.into(),
@@ -117,13 +132,29 @@ mod tests {
         styling.text_unselected.emphasis_1 = PaletteColor::EightBit(4);
         styling.text_unselected.emphasis_2 = PaletteColor::EightBit(5);
         styling.exit_code_error.base = PaletteColor::Rgb((6, 7, 8));
+        styling.text_selected.base = PaletteColor::EightBit(9);
+        styling.text_selected.background = PaletteColor::EightBit(10);
         let theme = Theme::from_styling(&styling);
         assert_eq!(theme.fg, Color::Indexed(1));
         assert_eq!(theme.bg, Color::Indexed(2));
+        assert_eq!(theme.select_fg, Color::Indexed(9));
+        assert_eq!(theme.select_bg, Color::Indexed(10));
         assert_eq!(theme.idle, Color::Indexed(1));
         assert_eq!(theme.blocked, Color::Indexed(3));
         assert_eq!(theme.working, Color::Indexed(4));
         assert_eq!(theme.done, Color::Indexed(5));
         assert_eq!(theme.error, Color::Rgb(6, 7, 8));
+    }
+
+    #[test]
+    fn select_colors_fall_back_to_ribbon_when_selected_background_is_same() {
+        let mut styling = Styling::default();
+        styling.text_unselected.background = PaletteColor::EightBit(2);
+        styling.text_selected.background = PaletteColor::EightBit(2);
+        styling.ribbon_unselected.base = PaletteColor::EightBit(11);
+        styling.ribbon_unselected.background = PaletteColor::EightBit(12);
+        let theme = Theme::from_styling(&styling);
+        assert_eq!(theme.select_fg, Color::Indexed(11));
+        assert_eq!(theme.select_bg, Color::Indexed(12));
     }
 }
