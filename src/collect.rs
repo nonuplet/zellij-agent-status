@@ -175,7 +175,7 @@ fn tab_names(tabs: &[TabInfo]) -> HashMap<usize, String> {
 
 /// `PaneManifest` から、ルートレコードを持つターミナルペインを `AgentStatus` にする。
 /// キーはペイン id。タブ名は `tab_names`（タブの位置 → タブ名）から引く。
-pub fn collect(
+fn collect(
     manifest: &PaneManifest,
     tab_names: &HashMap<usize, String>,
 ) -> HashMap<u32, AgentStatus> {

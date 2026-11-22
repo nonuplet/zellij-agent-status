@@ -38,7 +38,7 @@
 //! | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、`Blocked` / `Error` だけ（`attention`）、すべて（`all`）のどれか |
 //!
 //! 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が
-//! `false` ならタブ名 / `app` を飛ばす（`src/view/layout.rs` の `Item::new`）。
+//! `false` ならタブ名 / `app` を飛ばす（`src/view/item.rs` の `Item::new`）。
 //!
 //! `nerd_font` と `icon_style` を両方指定したときは、状態アイコンは `icon_style` に従う
 //! （Nerd Font モードで状態アイコンだけ絵文字にする、などができる）。
@@ -46,7 +46,7 @@
 //! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`show_app_name false`）も
 //! 文字列（`show_app_name "false"`）も、Zellij からは同じ文字列で届く。
 //!
-//! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/layout.rs`）で固定している。
+//! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/fit.rs`）で固定している。
 //!
 //! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。

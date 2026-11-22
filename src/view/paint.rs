@@ -2,7 +2,7 @@
 
 use unicode_width::UnicodeWidthStr;
 
-use super::layout::{Fill, Role, Span};
+use super::span::{Fill, Role, Span};
 use super::theme::Theme;
 
 /// Span 列に色を付け、幅 `cols` まで背景色の空白で埋める。

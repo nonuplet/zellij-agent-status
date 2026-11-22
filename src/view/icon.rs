@@ -16,7 +16,7 @@ pub enum IconStyle {
     /// 絵文字は前景色で塗っても色が変わらないので、状態の色では区別できない。
     Emoji,
     /// Nerd Font のアイコン（Font Awesome 系）。幅は 1 桁として扱う（[`app_icon`] を参照）。
-    /// 設定によっては右隣に空白を置く（layout で付ける。[`app_icon`] を参照）。
+    /// 設定によっては右隣に空白を置く（`Item` で付ける。[`app_icon`] を参照）。
     Nerd,
 }
 
@@ -64,7 +64,7 @@ impl IconStyle {
 /// フォントと端末の組み合わせで変わる（Mono 版のフォントでもはみ出すものがある。1 桁に収まるフォントでは、
 /// 端末によってアイコンが小さく潰れて見分けられないことがある）。
 /// 右隣が空白でないと、はみ出した部分が切れたり隣の文字と重なったりする。プログラムからは判別できないので、
-/// `nerd_font_icon_padding` が true のときだけ、状態アイコン・`app` のアイコンの右隣に layout で空白を置く。
+/// `nerd_font_icon_padding` が true のときだけ、状態アイコン・`app` のアイコンの右隣に `Item` で空白を置く。
 pub(super) fn app_icon(app: &str) -> Option<&'static str> {
     match app {
         "claude-code" => Some("\u{ec82}"),
@@ -73,8 +73,9 @@ pub(super) fn app_icon(app: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     use super::*;
+    use crate::view::test_support::assert_nerd_font_glyph;
     use unicode_width::UnicodeWidthStr;
 
     const STATES: [AgentState; 5] = [
@@ -84,15 +85,6 @@ pub(super) mod tests {
         AgentState::Done,
         AgentState::Error,
     ];
-
-    /// 1 文字だけで、BMP の Private Use Area にあり、幅 1 として数えられること
-    pub(in crate::view) fn assert_nerd_font_glyph(glyph: &str) {
-        let mut chars = glyph.chars();
-        let c = chars.next().unwrap();
-        assert_eq!(chars.next(), None, "{glyph:?}");
-        assert!(('\u{e000}'..='\u{f8ff}').contains(&c), "{glyph:?}");
-        assert_eq!(glyph.width(), 1, "{glyph:?}");
-    }
 
     #[test]
     fn symbols_are_one_column_wide() {
