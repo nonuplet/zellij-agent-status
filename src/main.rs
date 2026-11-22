@@ -106,13 +106,17 @@ impl State {
     /// 描画した行のエージェントを左クリックしたら、そのペインにフォーカスする。
     /// `focus_terminal_pane` は、ペインが別のタブにあればそのタブにも切り替える。
     /// 行は見ない（Zellij の tab-bar と同じ）。ペインの枠などで行の番号がずれても、クリックを取りこぼさないようにするため。
-    /// 選択モード中なら、どこをクリックしても選択モードを抜ける。再描画が必要なときに true を返す。
+    /// 選択モード中なら、どのボタンで、どこをクリックしても選択モードを抜ける（フォーカスするのは左クリックだけ）。
+    /// 再描画が必要なときに true を返す。
     fn click(&mut self, mouse: Mouse) -> bool {
-        let Mouse::LeftClick(_, col) = mouse else {
-            return false;
-        };
-        let left = self.leave();
-        if let Some(pane_id) = self.line.pane_at(col) {
+        let clicked = matches!(
+            mouse,
+            Mouse::LeftClick(..) | Mouse::RightClick(..) | Mouse::DoubleClick(..)
+        );
+        let left = clicked && self.leave();
+        if let Mouse::LeftClick(_, col) = mouse
+            && let Some(pane_id) = self.line.pane_at(col)
+        {
             focus_terminal_pane(pane_id, false, false);
         }
         left

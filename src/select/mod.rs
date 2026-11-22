@@ -116,17 +116,14 @@ mod tests {
     fn readme_keybind_sends_pipe_name() {
         use zellij_utils::input::config::Config;
 
-        // README の「選択モードのキー」の例と同じ。README を直したらここも直す
-        let kdl = r#"
-            keybinds {
-                tab {
-                    bind "a" {
-                        MessagePlugin { name "zellij-agent-status::select"; }
-                        SwitchToMode "Normal";
-                    }
-                }
-            }
-        "#;
+        // README の「選択モードのキー」の例（`keybinds` で始まる kdl のコードブロック）を、そのまま読む
+        let readme = include_str!("../../README.md");
+        let kdl = readme
+            .split("```kdl\n")
+            .skip(1)
+            .filter_map(|block| block.split_once("```").map(|(kdl, _)| kdl))
+            .find(|kdl| kdl.trim_start().starts_with("keybinds"))
+            .expect("README に keybinds の例がある");
         assert_tab_a_sends_pipe(&Config::from_kdl(kdl, None).unwrap());
     }
 
