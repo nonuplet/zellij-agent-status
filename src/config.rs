@@ -14,25 +14,13 @@
 
 use std::collections::BTreeMap;
 
-use crate::select::keybind::SelectKey;
 use crate::view::{
     BadgeShape, DEFAULT_MAX_LENGTH, IconStyle, MIN_MAX_LENGTH, MsgMode, ViewOptions,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     pub view: ViewOptions,
-    /// 選択モードに入るキー（[`crate::select::keybind`]）。None なら登録しない
-    pub select_key: Option<SelectKey>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            view: ViewOptions::default(),
-            select_key: Some(SelectKey::default()),
-        }
-    }
 }
 
 impl Config {
@@ -71,7 +59,6 @@ impl Config {
         );
         r.read("badge_name", &mut view.badge_name, parse_bool);
         r.read("msg_mode", &mut view.msg_mode, choice(MSG_MODES));
-        r.read("select_key", &mut config.select_key, parse_select_key);
 
         (config, r.warnings)
     }
@@ -157,16 +144,6 @@ fn parse_max_length(value: &str) -> Result<Option<usize>, String> {
             "0（上限なし）か {MIN_MAX_LENGTH} 以上の整数を指定してください（既定値 {DEFAULT_MAX_LENGTH} を使います）"
         )),
     }
-}
-
-/// 空（空白だけを含む）なら None（登録しない）。
-fn parse_select_key(value: &str) -> Result<Option<SelectKey>, String> {
-    if value.trim().is_empty() {
-        return Ok(None);
-    }
-    SelectKey::parse(value)
-        .map(Some)
-        .ok_or_else(|| guidance("`a` や `Ctrl a` のようなキーか、空文字（登録しない）"))
 }
 
 /// カンマか空白で区切った一覧。空なら None（絞り込まない）。
@@ -498,50 +475,6 @@ mod tests {
         let (config, warnings) = Config::from_configuration(&configuration(&[("apps", "claude")]));
         assert!(warnings.is_empty());
         assert_eq!(config.view.apps, Some(vec!["claude".to_string()]));
-    }
-
-    #[test]
-    fn select_key() {
-        let (config, warnings) = Config::from_configuration(&BTreeMap::new());
-        assert!(warnings.is_empty());
-        assert_eq!(config.select_key, SelectKey::parse("a"));
-
-        let (config, warnings) =
-            Config::from_configuration(&configuration(&[("select_key", "Ctrl s")]));
-        assert!(warnings.is_empty());
-        assert_eq!(config.select_key, SelectKey::parse("Ctrl s"));
-
-        // 空文字なら登録しない
-        for value in ["", " "] {
-            let (config, warnings) =
-                Config::from_configuration(&configuration(&[("select_key", value)]));
-            assert!(warnings.is_empty(), "{value:?}");
-            assert_eq!(config.select_key, None, "{value:?}");
-        }
-    }
-
-    #[test]
-    fn invalid_select_key_falls_back_to_default_with_warning() {
-        for value in ["ctrl+a", "foo", "Hyper a"] {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("select_key", value),
-                ("apps", "claude"),
-            ]));
-            assert_eq!(config.select_key, SelectKey::parse("a"), "{value}");
-            // 他のキーは影響を受けない
-            assert_eq!(
-                config.view.apps,
-                Some(vec!["claude".to_string()]),
-                "{value}"
-            );
-            assert_eq!(
-                warnings,
-                [format!(
-                    "select_key: `{value}` は使えません。`a` や `Ctrl a` のようなキーか、空文字（登録しない）を指定してください（既定値を使います）"
-                )],
-                "{value}"
-            );
-        }
     }
 
     #[test]

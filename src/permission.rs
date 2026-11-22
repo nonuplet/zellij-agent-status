@@ -5,7 +5,7 @@
 //! permission ダイアログはプラグインのペインに出るため、許可が得られるまでは
 //! selectable のままにしておき、許可を受け取ったときに unselectable にする。
 //!
-//! 要求する permission は次の 4 つ。1 回の要求でまとめて求める。
+//! 要求する permission は次の 3 つ。1 回の要求でまとめて求める。
 //! Zellij は 1 回の要求ごとに、許可・拒否を 1 つだけ返す（どの permission の結果かは分からない）。
 //! また、許可を保存するときはプラグインごとに一覧を丸ごと置き換える（`PermissionCache::cache`）ので、
 //! 分けて要求すると後の結果で前の許可が消えるおそれがある。
@@ -13,8 +13,6 @@
 //! - `ReadApplicationState`：エージェントの状態の収集（[`crate::collect`]）
 //! - `ChangeApplicationState`：選んだエージェントのペインへのフォーカスの移動（`focus_terminal_pane`）
 //! - `InterceptInput`：選択モード中のキーの横取り（`intercept_key_presses`。[`crate::select`]）
-//! - `Reconfigure`：選択モードに入るキーの登録（`reconfigure`。[`crate::select::keybind`]）
-
 use zellij_tile::prelude::*;
 
 /// 要求した permission の許可状態。
@@ -34,7 +32,6 @@ impl Permission {
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::InterceptInput,
-            PermissionType::Reconfigure,
         ]);
         subscribe(&[EventType::PermissionRequestResult]);
     }

@@ -1,6 +1,7 @@
 //! キー操作でのエージェントの選択（選択モード）。
 //!
-//! 選択モードには、キーバインド（[`keybind`]）から届くパイプで入る。入ってからは
+//! 選択モードには、ユーザが `config.kdl` の `keybinds` に書いたキーバインドから届くパイプ（[`PIPE_NAME`]）で入る
+//! （書き方は README）。プラグインからはキーを登録しない。入ってからは
 //! `intercept_key_presses` でキーを横取りし、[`KeyAction`] に従って選択を動かす（API の呼び出しは `main.rs`）。
 //! ここには、そのうち Zellij の API を呼ばない部分（キーの意味・最初の選択・選択の移動）を置く。
 //!
@@ -8,13 +9,16 @@
 //! 同じエージェントを選び続けるようにするため。選べるのは、その時点の行に表示されているエージェント
 //! （[`Line::pane_ids`](crate::view::Line::pane_ids)）だけにする。
 //!
-//! - [`keybind`]：選択モードに入るキーの登録
 //! - [`focus`]：このプラグインのタブ、アクティブなタブ、フォーカス中のペインの追跡
 
 pub mod focus;
-pub mod keybind;
 
 use zellij_tile::prelude::*;
+
+/// 選択モードに入るパイプのメッセージの名前。キーバインドの `MessagePlugin { name "..."; }` に書く。
+/// 送り先にプラグインの URL は書かない（設定値の違いなどで、別のインスタンスが起動することがあるため）。
+/// パイプは全インスタンスに届き、アクティブなタブにいるインスタンスだけが選択モードに入る（[`focus`]）
+pub const PIPE_NAME: &str = "zellij-agent-status::select";
 
 /// 選択モード中のキーの意味
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +93,50 @@ mod tests {
 
     fn action(text: &str) -> Option<KeyAction> {
         KeyAction::from_key(&KeyWithModifier::from_str(text).unwrap())
+    }
+
+    /// tab モードの `a` が、送り先の URL なしで [`PIPE_NAME`] を送るパイプになっていること
+    fn assert_tab_a_sends_pipe(config: &zellij_utils::input::config::Config) {
+        use zellij_tile::prelude::actions::Action;
+
+        let actions = config
+            .keybinds
+            .get_actions_for_key_in_mode(&InputMode::Tab, &KeyWithModifier::from_str("a").unwrap())
+            .unwrap();
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::KeybindPipe { name: Some(name), plugin: None, .. } if name == PIPE_NAME
+            )),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn readme_keybind_sends_pipe_name() {
+        use zellij_utils::input::config::Config;
+
+        // README の「選択モードのキー」の例と同じ。README を直したらここも直す
+        let kdl = r#"
+            keybinds {
+                tab {
+                    bind "a" {
+                        MessagePlugin { name "zellij-agent-status::select"; }
+                        SwitchToMode "Normal";
+                    }
+                }
+            }
+        "#;
+        assert_tab_a_sends_pipe(&Config::from_kdl(kdl, None).unwrap());
+    }
+
+    #[test]
+    fn dev_layout_keybind_sends_pipe_name() {
+        use zellij_utils::input::config::Config;
+
+        // Zellij はレイアウトファイルも設定として読む（`Layout::from_path_or_default` と同じ読み方）
+        let kdl = include_str!("../../dev.kdl");
+        assert_tab_a_sends_pipe(&Config::from_layout_kdl(kdl, None).unwrap());
     }
 
     #[test]

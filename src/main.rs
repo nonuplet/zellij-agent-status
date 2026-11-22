@@ -12,9 +12,8 @@ use collect::Collector;
 use config::Config;
 use model::AgentStatus;
 use permission::Permission;
-use select::KeyAction;
 use select::focus::{self, Focus};
-use select::keybind::{Keybind, PIPE_NAME, Step};
+use select::{KeyAction, PIPE_NAME};
 use view::{Line, Theme};
 
 /// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
@@ -31,7 +30,6 @@ struct State {
     /// 最後に描画した行。クリックされた列のエージェントや、キー操作で選べるエージェントを引くのに使う
     line: Line,
     focus: Focus,
-    keybind: Keybind,
     /// 選択モード中なら Some
     selection: Option<Selection>,
 }
@@ -53,7 +51,6 @@ impl ZellijPlugin for State {
         for warning in &warnings {
             eprintln!("{MESSAGE_PREFIX}{warning}");
         }
-        self.keybind = Keybind::new(config.select_key.clone());
         self.config = config;
         self.warnings = warnings;
         self.focus = Focus::new(get_plugin_ids().plugin_id);
@@ -70,17 +67,12 @@ impl ZellijPlugin for State {
 
     fn update(&mut self, event: Event) -> bool {
         match &event {
-            Event::PermissionRequestResult(status) => {
-                let changed = self.permission.update(*status);
-                self.sync_keybind() || changed
-            }
+            Event::PermissionRequestResult(status) => self.permission.update(*status),
             Event::ModeUpdate(mode_info) => {
-                self.keybind.observe(mode_info);
-                let warned = self.sync_keybind();
                 let theme = Theme::from_styling(&mode_info.style.colors);
                 let changed = theme != self.theme;
                 self.theme = theme;
-                changed || warned
+                changed
             }
             Event::Mouse(mouse) => self.click(*mouse),
             Event::InterceptedKeyPress(key) => self.key(key),
@@ -108,27 +100,6 @@ impl ZellijPlugin for State {
 }
 
 impl State {
-    /// キーの登録を進める（[`select::keybind`]）。permission が拒否されたときや、まだ届いていないときは何もしない。
-    /// 警告を出したときに true を返す。
-    fn sync_keybind(&mut self) -> bool {
-        if self.permission != Permission::Granted {
-            return false;
-        }
-        match self.keybind.step() {
-            Step::None => false,
-            Step::Register(kdl) => {
-                // セッション内だけに登録し、ユーザの設定ファイルには書き込まない
-                reconfigure(kdl, false);
-                false
-            }
-            Step::Warn(warning) => {
-                eprintln!("{MESSAGE_PREFIX}{warning}");
-                self.warnings.push(warning);
-                true
-            }
-        }
-    }
-
     /// 描画した行のエージェントを左クリックしたら、そのペインにフォーカスする。
     /// `focus_terminal_pane` は、ペインが別のタブにあればそのタブにも切り替える。
     /// 行は見ない（Zellij の tab-bar と同じ）。ペインの枠などで行の番号がずれても、クリックを取りこぼさないようにするため。

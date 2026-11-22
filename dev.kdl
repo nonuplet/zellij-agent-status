@@ -1,5 +1,16 @@
 // 開発用レイアウト。`cargo build` の後、プロジェクトルートで `zellij --layout dev.kdl` で起動する。
 
+// レイアウトファイルに書いた keybinds も設定として読まれる（ユーザの config.kdl と合わせて使われる）。
+// Ctrl t（tab モード）→ a で選択モードに入る。README の「選択モードのキー」と同じ
+keybinds {
+    tab {
+        bind "a" {
+            MessagePlugin { name "zellij-agent-status::select"; }
+            SwitchToMode "Normal"; // unlock-first のプリセットなら "Locked"
+        }
+    }
+}
+
 layout {
     pane size=1 borderless=true {
         plugin location="zellij:tab-bar"
