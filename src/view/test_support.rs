@@ -12,12 +12,10 @@ pub(super) fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
         tab_name: None,
         cwd: None,
         state,
-        kind: None,
         progress: None,
         app: Some("claude".to_owned()),
         title: None,
         msg: None,
-        updated_ms: 0,
     }
 }
 

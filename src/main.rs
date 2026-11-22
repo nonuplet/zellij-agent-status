@@ -1,17 +1,21 @@
 mod collect;
 mod config;
 mod model;
+mod permission;
 mod view;
 
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
-use collect::{Collector, Permission};
+use collect::Collector;
 use config::Config;
+use model::AgentStatus;
+use permission::Permission;
 use view::Theme;
 
 #[derive(Default)]
 struct State {
+    permission: Permission,
     collector: Collector,
     config: Config,
     /// 設定の警告。エージェントがいないときに表示する
@@ -30,13 +34,15 @@ impl ZellijPlugin for State {
         self.config = config;
         self.warnings = warnings;
 
-        // permission の要求と、許可が出るまで selectable のままにする処理は Collector が持つ
-        self.collector.load();
+        // 許可が出るまで selectable のままにする処理は Permission が持つ
+        Permission::request();
+        Collector::subscribe();
         subscribe(&[EventType::ModeUpdate]);
     }
 
     fn update(&mut self, event: Event) -> bool {
         match &event {
+            Event::PermissionRequestResult(status) => self.permission.update(*status),
             Event::ModeUpdate(mode_info) => {
                 let theme = Theme::from_styling(&mode_info.style.colors);
                 let changed = theme != self.theme;
@@ -60,17 +66,18 @@ const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
 
 impl State {
     fn line(&self, cols: usize) -> String {
-        if let Some(text) = permission_message(self.collector.permission()) {
+        if let Some(text) = permission_message(self.permission) {
             return self.message(text, cols);
         }
 
         let options = &self.config.view;
+        let statuses: Vec<AgentStatus> = self.collector.statuses().collect();
         // 1 行しかないので、警告はエージェント一覧の表示を邪魔しない「空のとき」だけ出す
-        let empty = !self.collector.statuses().any(|s| options.shows(s));
+        let empty = !statuses.iter().any(|s| options.shows(s));
         if empty && let Some(warning) = self.warnings.first() {
             return self.message(warning, cols);
         }
-        view::render_line(self.collector.statuses(), cols, &self.theme, options)
+        view::render_line(&statuses, cols, &self.theme, options)
     }
 
     fn message(&self, text: &str, cols: usize) -> String {

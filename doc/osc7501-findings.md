@@ -66,5 +66,5 @@ Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` の `
 
 ## プラグイン実装上の注意
 
-- permission ダイアログはプラグインのペインに出るので、`set_selectable(false)` にしているとユーザが応答できない。このプラグインは、許可が得られるまで selectable のままにしている（`src/collect.rs`）。
+- permission ダイアログはプラグインのペインに出るので、`set_selectable(false)` にしているとユーザが応答できない。このプラグインは、許可が得られるまで selectable のままにしている（`src/permission.rs`）。
   - unselectable の状態で本当に応答できないかは試していない。
