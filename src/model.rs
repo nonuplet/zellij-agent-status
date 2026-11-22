@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
-use zellij_tile::prelude::BlockedKind;
 use zellij_utils::attention::ProgramState;
 
 /// 1 ペインで動いているエージェント 1 件分の状態。
+/// レコードのフィールドのうち、表示に使うものだけを持つ（`kind` や `updated_ms` は使うまで持たない）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentStatus {
     /// ターミナルペインの id（`PaneId::Terminal(pane_id)`）
@@ -22,8 +22,6 @@ pub struct AgentStatus {
     /// まだ取得していないとき、取得に失敗したときは None。表示するかどうかは view の `show_cwd` で決める
     pub cwd: Option<PathBuf>,
     pub state: AgentState,
-    /// `state` が `Blocked` のときの理由
-    pub kind: Option<BlockedKind>,
     /// 0〜100
     pub progress: Option<u8>,
     /// 送信元のアプリ名（例：`claude`）
@@ -32,8 +30,6 @@ pub struct AgentStatus {
     pub title: Option<String>,
     /// base64 デコード済み
     pub msg: Option<String>,
-    /// Zellij がレコードを受け取った時刻（UNIX エポックからのミリ秒）
-    pub updated_ms: u64,
 }
 
 /// エージェントの状態。

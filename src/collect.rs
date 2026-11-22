@@ -1,19 +1,37 @@
 //! 状態の収集。
 //!
+//! Collector は、イベントごとに次の 3 つの表を持ち、[`Collector::statuses`] で結合して `AgentStatus` を作る。
+//! どの表もペイン id かタブの位置をキーにした HashMap で、順序は持たない。表示の並び順は view で決める。
+//!
+//! | 表 | 元のイベント | 中身 |
+//! |---|---|---|
+//! | エージェントの表 | `PaneUpdate` | ペイン id → タブの位置と、ルートレコードから取り出した状態 |
+//! | タブ名の表 | `TabUpdate` | タブの位置 → タブ名 |
+//! | cwd の表 | `get_pane_cwd` / `CwdChanged` | ペイン id → カレントディレクトリ |
+//!
+//! 再描画するかどうかは、イベントが更新した表が変わったかで決める。`PaneUpdate` / `TabUpdate` は
+//! フォーカスの移動などでも届くが、表が変わらなければ再描画しない。HashMap 同士の比較は順序に依存しないので、
+//! manifest の走査順の違いは変化として扱われない。
+//!
+//! ## エージェントの表
+//!
 //! `PaneUpdate` で届く `PaneManifest` から、各ターミナルペインのルートレコード
-//! （`id` が None の `ProgramStatusRecord`）を取り出して `AgentStatus` に変換する。
+//! （`id` が None の `ProgramStatusRecord`）を取り出す。
 //! `id` 付きレコードは更新イベントが届かないことがあるため扱わない（doc/osc7501-findings.md）。
+//! レコードはそのまま持たず、表示に使うフィールドだけを取り出す（[`Agent`]）。
 //!
 //! レコードは送信元のプログラムが終わると Zellij が消すので、古いレコードの掃除はしない。
 //!
-//! 一覧はペイン id をキーにした HashMap で持ち、順序は持たない。表示の並び順は view で決める。
+//! ## タブ名の表
 //!
-//! タブ名は `TabUpdate` で別に届く。`PaneManifest.panes` のキーは `TabInfo.position` と同じ
-//! （zellij-server が `tab.position` をキーにして作っている）ので、位置でタブ名を引いて付ける。
-//! `TabUpdate` と `PaneUpdate` は届く順序が決まっていないため、タブ名の表を持っておき、
-//! どちらが届いても付け直す。タブを移動した直後などで一時的にずれても、もう一方が届けば正しくなる。
+//! `PaneManifest.panes` のキーは `TabInfo.position` と同じ（zellij-server が `tab.position` を
+//! キーにして作っている）ので、位置でタブ名を引く。`TabUpdate` と `PaneUpdate` は届く順序が
+//! 決まっていないが、結合は `statuses` で行うので、どちらが先に届いても正しく付く。
+//! タブを移動した直後などで一時的にずれても、もう一方が届けば正しくなる。
 //!
-//! カレントディレクトリは `PaneInfo` にないので、別に持つ。表示するかどうか（`show_cwd`）は view で決め、
+//! ## cwd の表
+//!
+//! カレントディレクトリは `PaneInfo` にないので、別に取得する。表示するかどうか（`show_cwd`）は view で決め、
 //! ここでは常に取得する（`get_pane_cwd` も `CwdChanged` も、すでに要求している `ReadApplicationState` で足りる）。
 //! - エージェントのペインが現れたら、`get_pane_cwd` で 1 回取得する（`CwdChanged` は変化したときにしか届かないため）
 //! - その後の移動は `CwdChanged` で追従する
@@ -26,41 +44,40 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::MESSAGE_PREFIX;
 use crate::model::{AgentState, AgentStatus};
 use zellij_tile::prelude::*;
 use zellij_utils::attention::ProgramStatusRecord;
 
-/// `ReadApplicationState` の許可状態。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Permission {
-    /// 結果がまだ届いていない
-    #[default]
-    Pending,
-    Granted,
-    Denied,
-}
-
 /// イベントを受け取り、現在のエージェントの一覧を保持する。
 #[derive(Debug, Default)]
 pub struct Collector {
-    permission: Permission,
-    /// 最後に届いた `TabUpdate` の、タブの位置 → タブ名
+    /// エージェントの表。キーはペイン id（ターミナルペインの id はタブをまたいでも一意）
+    agents: HashMap<u32, Agent>,
+    /// タブ名の表。最後に届いた `TabUpdate` の、タブの位置 → タブ名
     tab_names: HashMap<usize, String>,
-    /// エージェントのペインの id → カレントディレクトリ。取得に失敗したペインは None で持ち、取得し直さない
+    /// cwd の表。エージェントのペインの id → カレントディレクトリ。
+    /// 取得に失敗したペインは None で持ち、取得し直さない
     cwds: HashMap<u32, Option<PathBuf>>,
-    /// キーはペイン id（ターミナルペインの id はタブをまたいでも一意）
-    statuses: HashMap<u32, AgentStatus>,
+}
+
+/// エージェントの表の 1 件。ルートレコードのうち、表示に使うフィールドだけを持つ。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Agent {
+    /// ペインが属するタブの位置（`PaneManifest.panes` のキー）
+    tab: usize,
+    state: AgentState,
+    progress: Option<u8>,
+    app: Option<String>,
+    title: Option<String>,
+    msg: Option<String>,
 }
 
 impl Collector {
-    /// `ZellijPlugin::load` から呼ぶ。permission の要求と、必要なイベントの購読を行う。
-    ///
-    /// permission ダイアログはプラグインのペインに出るため、許可が得られるまでは
-    /// selectable のままにしておく（unselectable にするのは `update` で許可を受け取ったとき）。
-    pub fn load(&self) {
-        request_permission(&[PermissionType::ReadApplicationState]);
+    /// `ZellijPlugin::load` から呼ぶ。収集に使うイベントを購読する。
+    /// 届くのは `ReadApplicationState` が許可された後（permission の要求は [`crate::permission`]）。
+    pub fn subscribe() {
         subscribe(&[
-            EventType::PermissionRequestResult,
             EventType::PaneUpdate,
             EventType::TabUpdate,
             EventType::CwdChanged,
@@ -69,15 +86,11 @@ impl Collector {
 
     /// `ZellijPlugin::update` から呼ぶ。再描画が必要なときに true を返す。
     pub fn update(&mut self, event: &Event) -> bool {
-        let was_granted = self.permission == Permission::Granted;
         let mut changed = self.apply(event);
-        if !was_granted && self.permission == Permission::Granted {
-            set_selectable(false);
-        }
         for pane_id in self.missing_cwds() {
             let cwd = get_pane_cwd(PaneId::Terminal(pane_id))
                 .inspect_err(|e| {
-                    eprintln!("zellij-agent-status: ペイン {pane_id} の cwd を取得できません: {e}")
+                    eprintln!("{MESSAGE_PREFIX}ペイン {pane_id} の cwd を取得できません: {e}")
                 })
                 .ok();
             changed |= self.set_cwd(pane_id, cwd);
@@ -85,67 +98,41 @@ impl Collector {
         changed
     }
 
-    pub fn permission(&self) -> Permission {
-        self.permission
-    }
-
-    /// 現在のエージェントの一覧。順序は決まっていない。
-    pub fn statuses(&self) -> impl Iterator<Item = &AgentStatus> {
-        self.statuses.values()
+    /// 現在のエージェントの一覧。3 つの表を結合して作る。順序は決まっていない。
+    pub fn statuses(&self) -> impl Iterator<Item = AgentStatus> + '_ {
+        self.agents.iter().map(|(&pane_id, agent)| AgentStatus {
+            pane_id,
+            tab: agent.tab,
+            tab_name: self.tab_names.get(&agent.tab).cloned(),
+            cwd: self.cwds.get(&pane_id).cloned().flatten(),
+            state: agent.state,
+            progress: agent.progress,
+            app: agent.app.clone(),
+            title: agent.title.clone(),
+            msg: agent.msg.clone(),
+        })
     }
 
     /// `update` のうち、Zellij の API を呼ばない部分（テスト用に分けている）。
     fn apply(&mut self, event: &Event) -> bool {
         match event {
-            Event::PermissionRequestResult(status) => {
-                let permission = match status {
-                    PermissionStatus::Granted => Permission::Granted,
-                    PermissionStatus::Denied => Permission::Denied,
-                };
-                let changed = self.permission != permission;
-                self.permission = permission;
-                changed
-            }
             Event::PaneUpdate(manifest) => {
-                let mut statuses = collect(manifest, &self.tab_names);
-                self.cwds
-                    .retain(|pane_id, _| statuses.contains_key(pane_id));
-                for status in statuses.values_mut() {
-                    status.cwd = self.cwds.get(&status.pane_id).cloned().flatten();
-                }
-                self.replace(statuses)
+                let agents = collect(manifest);
+                self.cwds.retain(|pane_id, _| agents.contains_key(pane_id));
+                replace(&mut self.agents, agents)
             }
-            // エージェントでないペインの cwd は持たない（エージェントが現れたときに取得する）
-            Event::CwdChanged(PaneId::Terminal(pane_id), cwd, _)
-                if self.statuses.contains_key(pane_id) =>
-            {
+            Event::TabUpdate(tabs) => replace(&mut self.tab_names, tab_names(tabs)),
+            Event::CwdChanged(PaneId::Terminal(pane_id), cwd, _) => {
                 self.set_cwd(*pane_id, Some(cwd.clone()))
-            }
-            Event::TabUpdate(tabs) => {
-                self.tab_names = tab_names(tabs);
-                let mut statuses = self.statuses.clone();
-                for status in statuses.values_mut() {
-                    status.tab_name = self.tab_names.get(&status.tab).cloned();
-                }
-                self.replace(statuses)
             }
             _ => false,
         }
     }
 
-    /// 一覧を置き換え、変化があれば true を返す。
-    /// `PaneUpdate` / `TabUpdate` はフォーカス移動などでも届くので、変化がなければ再描画しない。
-    /// HashMap 同士の比較は順序に依存しないので、manifest の走査順の違いは変化として扱われない。
-    fn replace(&mut self, statuses: HashMap<u32, AgentStatus>) -> bool {
-        let changed = self.statuses != statuses;
-        self.statuses = statuses;
-        changed
-    }
-
     /// cwd をまだ取得していないエージェントのペイン id（昇順）。
     fn missing_cwds(&self) -> Vec<u32> {
         let mut missing: Vec<u32> = self
-            .statuses
+            .agents
             .keys()
             .filter(|pane_id| !self.cwds.contains_key(pane_id))
             .copied()
@@ -155,15 +142,22 @@ impl Collector {
     }
 
     /// エージェントのペインの cwd を記録し、表示が変わるなら true を返す。
+    /// エージェントでないペインの cwd は持たない（エージェントが現れたときに取得する）。
+    /// まだ取得していないペインで取得に失敗した（`cwd` が None の）ときは、取得前と表示が同じなので変化として扱わない。
     fn set_cwd(&mut self, pane_id: u32, cwd: Option<PathBuf>) -> bool {
-        let Some(status) = self.statuses.get_mut(&pane_id) else {
+        if !self.agents.contains_key(&pane_id) {
             return false;
-        };
-        self.cwds.insert(pane_id, cwd.clone());
-        let changed = status.cwd != cwd;
-        status.cwd = cwd;
-        changed
+        }
+        let old = self.cwds.insert(pane_id, cwd.clone()).flatten();
+        old != cwd
     }
+}
+
+/// 表を置き換え、変化があれば true を返す。
+fn replace<T: PartialEq>(table: &mut T, new: T) -> bool {
+    let changed = *table != new;
+    *table = new;
+    changed
 }
 
 /// タブの位置（`TabInfo.position`）→ タブ名。
@@ -173,48 +167,34 @@ fn tab_names(tabs: &[TabInfo]) -> HashMap<usize, String> {
         .collect()
 }
 
-/// `PaneManifest` から、ルートレコードを持つターミナルペインを `AgentStatus` にする。
-/// キーはペイン id。タブ名は `tab_names`（タブの位置 → タブ名）から引く。
-pub fn collect(
-    manifest: &PaneManifest,
-    tab_names: &HashMap<usize, String>,
-) -> HashMap<u32, AgentStatus> {
+/// `PaneManifest` から、ルートレコードを持つターミナルペインを取り出す。キーはペイン id。
+fn collect(manifest: &PaneManifest) -> HashMap<u32, Agent> {
     manifest
         .panes
         .iter()
         .flat_map(|(&tab, panes)| {
-            let tab_name = tab_names.get(&tab);
             panes
                 .iter()
                 .filter(|pane| !pane.is_plugin)
                 .filter_map(move |pane| {
                     let record = pane.program_status.iter().find(|r| r.is_root())?;
-                    Some((pane.id, to_status(tab, tab_name, pane.id, record)))
+                    Some((pane.id, Agent::new(tab, record)))
                 })
         })
         .collect()
 }
 
-fn to_status(
-    tab: usize,
-    tab_name: Option<&String>,
-    pane_id: u32,
-    record: &ProgramStatusRecord,
-) -> AgentStatus {
-    AgentStatus {
-        pane_id,
-        tab,
-        tab_name: tab_name.cloned(),
-        // manifest には含まれないので、Collector が別に付ける
-        cwd: None,
-        // OSC 7501 では state が必須なので通常は Some。None のときは Zellij 側の解釈（Idle）に合わせる
-        state: AgentState::from(record.state()),
-        kind: record.kind,
-        progress: record.progress,
-        app: record.app.clone(),
-        title: record.title.clone(),
-        msg: record.msg.clone(),
-        updated_ms: record.updated_ms,
+impl Agent {
+    fn new(tab: usize, record: &ProgramStatusRecord) -> Self {
+        Agent {
+            tab,
+            // OSC 7501 では state が必須なので通常は Some。None のときは Zellij 側の解釈（Idle）に合わせる
+            state: AgentState::from(record.state()),
+            progress: record.progress,
+            app: record.app.clone(),
+            title: record.title.clone(),
+            msg: record.msg.clone(),
+        }
     }
 }
 
@@ -257,38 +237,40 @@ mod tests {
         )
     }
 
-    fn tab_name_of(collector: &Collector, pane_id: u32) -> Option<&str> {
-        collector
-            .statuses()
-            .find(|s| s.pane_id == pane_id)
-            .and_then(|s| s.tab_name.as_deref())
+    fn status_of(collector: &Collector, pane_id: u32) -> Option<AgentStatus> {
+        collector.statuses().find(|s| s.pane_id == pane_id)
+    }
+
+    fn tab_name_of(collector: &Collector, pane_id: u32) -> Option<String> {
+        status_of(collector, pane_id)?.tab_name
     }
 
     #[test]
     fn tab_without_name_entry_has_no_tab_name() {
+        let mut collector = Collector::default();
         let working = || vec![record(None, ProgramState::Working)];
-        let m = manifest(vec![
+        collector.apply(&tab_update(&[(0, "main")]));
+        collector.apply(&Event::PaneUpdate(manifest(vec![
             (0, vec![terminal(1, working())]),
             (1, vec![terminal(2, working())]),
-        ]);
-        let names = HashMap::from([(0, "main".to_owned())]);
+        ])));
 
-        let statuses = collect(&m, &names);
-        assert_eq!(statuses[&1].tab_name.as_deref(), Some("main"));
-        assert_eq!(statuses[&2].tab_name, None);
+        assert_eq!(tab_name_of(&collector, 1).as_deref(), Some("main"));
+        assert_eq!(tab_name_of(&collector, 2), None);
     }
 
     #[test]
     fn tab_name_is_attached_when_tab_update_comes_first() {
         let mut collector = Collector::default();
-        assert!(!collector.apply(&tab_update(&[(0, "main"), (1, "work")])));
+        // タブ名の表が変わるので、エージェントがいなくても再描画する
+        assert!(collector.apply(&tab_update(&[(0, "main"), (1, "work")])));
 
         let m = manifest(vec![(
             1,
             vec![terminal(4, vec![record(None, ProgramState::Working)])],
         )]);
         assert!(collector.apply(&Event::PaneUpdate(m)));
-        assert_eq!(tab_name_of(&collector, 4), Some("work"));
+        assert_eq!(tab_name_of(&collector, 4).as_deref(), Some("work"));
     }
 
     #[test]
@@ -302,7 +284,7 @@ mod tests {
         assert_eq!(tab_name_of(&collector, 4), None);
 
         assert!(collector.apply(&tab_update(&[(0, "main"), (1, "work")])));
-        assert_eq!(tab_name_of(&collector, 4), Some("work"));
+        assert_eq!(tab_name_of(&collector, 4).as_deref(), Some("work"));
     }
 
     #[test]
@@ -317,7 +299,7 @@ mod tests {
 
         // タブ名の変更
         assert!(collector.apply(&tab_update(&[(0, "main"), (1, "review")])));
-        assert_eq!(tab_name_of(&collector, 2), Some("review"));
+        assert_eq!(tab_name_of(&collector, 2).as_deref(), Some("review"));
 
         // 名前に関係ない TabUpdate（フォーカス移動など）では再描画しない
         assert!(!collector.apply(&tab_update(&[(0, "main"), (1, "review")])));
@@ -328,12 +310,13 @@ mod tests {
             (0, vec![terminal(2, working())]),
             (1, vec![terminal(1, working())]),
         ])));
-        assert_eq!(tab_name_of(&collector, 1), Some("main"));
-        assert_eq!(tab_name_of(&collector, 2), Some("review"));
+        assert_eq!(tab_name_of(&collector, 1).as_deref(), Some("main"));
+        assert_eq!(tab_name_of(&collector, 2).as_deref(), Some("review"));
     }
 
     #[test]
     fn converts_all_fields_of_root_record() {
+        let mut collector = Collector::default();
         let root = ProgramStatusRecord {
             id: None,
             state: Some(ProgramState::Blocked),
@@ -344,27 +327,26 @@ mod tests {
             msg: Some("Bash を実行しますか".to_owned()),
             updated_ms: 1234,
         };
-        let m = manifest(vec![(1, vec![terminal(7, vec![root])])]);
-        let names = HashMap::from([(0, "main".to_owned()), (1, "work".to_owned())]);
+        collector.apply(&tab_update(&[(0, "main"), (1, "work")]));
+        collector.apply(&Event::PaneUpdate(manifest(vec![(
+            1,
+            vec![terminal(7, vec![root])],
+        )])));
+        collector.set_cwd(7, Some(PathBuf::from("/repo/main")));
 
         assert_eq!(
-            collect(&m, &names),
-            HashMap::from([(
-                7,
-                AgentStatus {
-                    pane_id: 7,
-                    tab: 1,
-                    tab_name: Some("work".to_owned()),
-                    cwd: None,
-                    state: AgentState::Blocked,
-                    kind: Some(BlockedKind::Permission),
-                    progress: Some(42),
-                    app: Some("claude".to_owned()),
-                    title: Some("タイトル".to_owned()),
-                    msg: Some("Bash を実行しますか".to_owned()),
-                    updated_ms: 1234,
-                }
-            )])
+            collector.statuses().collect::<Vec<_>>(),
+            vec![AgentStatus {
+                pane_id: 7,
+                tab: 1,
+                tab_name: Some("work".to_owned()),
+                cwd: Some(PathBuf::from("/repo/main")),
+                state: AgentState::Blocked,
+                progress: Some(42),
+                app: Some("claude".to_owned()),
+                title: Some("タイトル".to_owned()),
+                msg: Some("Bash を実行しますか".to_owned()),
+            }]
         );
     }
 
@@ -381,9 +363,9 @@ mod tests {
             )],
         )]);
 
-        let statuses = collect(&m, &HashMap::new());
-        assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[&1].state, AgentState::Working);
+        let agents = collect(&m);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[&1].state, AgentState::Working);
     }
 
     #[test]
@@ -396,7 +378,7 @@ mod tests {
             ],
         )]);
 
-        assert!(collect(&m, &HashMap::new()).is_empty());
+        assert!(collect(&m).is_empty());
     }
 
     #[test]
@@ -405,7 +387,7 @@ mod tests {
         plugin.is_plugin = true;
         let m = manifest(vec![(0, vec![plugin])]);
 
-        assert!(collect(&m, &HashMap::new()).is_empty());
+        assert!(collect(&m).is_empty());
     }
 
     #[test]
@@ -413,7 +395,7 @@ mod tests {
         let root = ProgramStatusRecord::default();
         let m = manifest(vec![(0, vec![terminal(1, vec![root])])]);
 
-        assert_eq!(collect(&m, &HashMap::new())[&1].state, AgentState::Idle);
+        assert_eq!(collect(&m)[&1].state, AgentState::Idle);
     }
 
     #[test]
@@ -425,12 +407,12 @@ mod tests {
             (1, vec![terminal(1, working())]),
         ]);
 
-        let statuses = collect(&m, &HashMap::new());
-        assert_eq!(statuses.len(), 4);
-        assert_eq!(statuses[&1].tab, 1);
-        assert_eq!(statuses[&5].tab, 2);
-        assert_eq!(statuses[&9].tab, 0);
-        assert_eq!(statuses[&3].tab, 0);
+        let agents = collect(&m);
+        assert_eq!(agents.len(), 4);
+        assert_eq!(agents[&1].tab, 1);
+        assert_eq!(agents[&5].tab, 2);
+        assert_eq!(agents[&9].tab, 0);
+        assert_eq!(agents[&3].tab, 0);
     }
 
     #[test]
@@ -469,22 +451,27 @@ mod tests {
     }
 
     #[test]
-    fn permission_result_is_recorded() {
+    fn fields_not_shown_do_not_request_render() {
         let mut collector = Collector::default();
-        assert_eq!(collector.permission(), Permission::Pending);
+        let pane_update = |kind, updated_ms| {
+            let root = ProgramStatusRecord {
+                kind,
+                updated_ms,
+                ..record(None, ProgramState::Blocked)
+            };
+            Event::PaneUpdate(manifest(vec![(0, vec![terminal(1, vec![root])])]))
+        };
+        assert!(collector.apply(&pane_update(None, 1)));
 
-        assert!(collector.apply(&Event::PermissionRequestResult(PermissionStatus::Granted)));
-        assert_eq!(collector.permission(), Permission::Granted);
-
-        assert!(!collector.apply(&Event::PermissionRequestResult(PermissionStatus::Granted)));
+        // 同じ状態の再送（updated_ms だけが変わる）
+        assert!(!collector.apply(&pane_update(None, 2)));
+        // 表示に使っていない kind だけが変わる
+        assert!(!collector.apply(&pane_update(Some(BlockedKind::Permission), 3)));
     }
 
-    fn cwd_of(collector: &Collector, pane_id: u32) -> Option<&str> {
-        collector
-            .statuses()
-            .find(|s| s.pane_id == pane_id)
-            .and_then(|s| s.cwd.as_deref())
-            .and_then(|p| p.to_str())
+    fn cwd_of(collector: &Collector, pane_id: u32) -> Option<String> {
+        let cwd = status_of(collector, pane_id)?.cwd?;
+        cwd.to_str().map(str::to_owned)
     }
 
     fn cwd_changed(pane_id: u32, cwd: &str) -> Event {
@@ -509,12 +496,12 @@ mod tests {
         // 取得に失敗したペインも、取得し直さない
         assert!(!collector.set_cwd(3, None));
         assert!(collector.missing_cwds().is_empty());
-        assert_eq!(cwd_of(&collector, 1), Some("/repo/main"));
+        assert_eq!(cwd_of(&collector, 1).as_deref(), Some("/repo/main"));
         assert_eq!(cwd_of(&collector, 3), None);
 
         // PaneUpdate で作り直しても cwd は残り、変化として扱わない
         assert!(!collector.apply(&agents(&[3, 1])));
-        assert_eq!(cwd_of(&collector, 1), Some("/repo/main"));
+        assert_eq!(cwd_of(&collector, 1).as_deref(), Some("/repo/main"));
         assert!(collector.missing_cwds().is_empty());
 
         collector.apply(&agents(&[3, 1, 5]));
@@ -528,17 +515,17 @@ mod tests {
         collector.set_cwd(1, Some(PathBuf::from("/repo/main")));
 
         assert!(collector.apply(&cwd_changed(1, "/repo/issue-21")));
-        assert_eq!(cwd_of(&collector, 1), Some("/repo/issue-21"));
+        assert_eq!(cwd_of(&collector, 1).as_deref(), Some("/repo/issue-21"));
         assert!(!collector.apply(&cwd_changed(1, "/repo/issue-21")));
 
         // 取得に失敗していたペインも、CwdChanged が届けば表示する
         collector.set_cwd(1, None);
         assert!(collector.apply(&cwd_changed(1, "/repo/main")));
-        assert_eq!(cwd_of(&collector, 1), Some("/repo/main"));
+        assert_eq!(cwd_of(&collector, 1).as_deref(), Some("/repo/main"));
 
-        // TabUpdate で付け直しても cwd は残る
+        // TabUpdate が届いても cwd は残る
         collector.apply(&tab_update(&[(0, "main")]));
-        assert_eq!(cwd_of(&collector, 1), Some("/repo/main"));
+        assert_eq!(cwd_of(&collector, 1).as_deref(), Some("/repo/main"));
     }
 
     #[test]
@@ -567,5 +554,7 @@ mod tests {
     fn unrelated_events_do_not_request_render() {
         let mut collector = Collector::default();
         assert!(!collector.apply(&Event::Timer(0.5)));
+        // permission の結果は Collector では扱わない（crate::permission）
+        assert!(!collector.apply(&Event::PermissionRequestResult(PermissionStatus::Granted)));
     }
 }
