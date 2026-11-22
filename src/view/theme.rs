@@ -1,5 +1,7 @@
 //! 色とテーマ。
 
+use std::fmt;
+
 use zellij_tile::prelude::{PaletteColor, Styling};
 
 use crate::model::AgentState;
@@ -21,11 +23,37 @@ impl From<PaletteColor> for Color {
 }
 
 impl Color {
-    /// SGR のパラメータ。`base` は前景色なら 38、背景色なら 48。
-    pub(super) fn sgr(self, base: u8) -> String {
-        match self {
-            Color::Rgb(r, g, b) => format!("{base};2;{r};{g};{b}"),
-            Color::Indexed(n) => format!("{base};5;{n}"),
+    /// 前景色にする SGR のパラメータ
+    pub(super) fn fg(self) -> Sgr {
+        Sgr {
+            color: self,
+            base: 38,
+        }
+    }
+
+    /// 背景色にする SGR のパラメータ
+    pub(super) fn bg(self) -> Sgr {
+        Sgr {
+            color: self,
+            base: 48,
+        }
+    }
+}
+
+/// 色を指定する SGR のパラメータ（`38;5;n` など）。文字列は作らず、[`Display`](fmt::Display) で書き出す。
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Sgr {
+    color: Color,
+    /// 前景色なら 38、背景色なら 48
+    base: u8,
+}
+
+impl fmt::Display for Sgr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let base = self.base;
+        match self.color {
+            Color::Rgb(r, g, b) => write!(f, "{base};2;{r};{g};{b}"),
+            Color::Indexed(n) => write!(f, "{base};5;{n}"),
         }
     }
 }

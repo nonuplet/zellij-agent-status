@@ -13,6 +13,9 @@ use model::AgentStatus;
 use permission::Permission;
 use view::Theme;
 
+/// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
+const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
+
 #[derive(Default)]
 struct State {
     permission: Permission,
@@ -29,7 +32,7 @@ impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         let (config, warnings) = Config::from_configuration(&configuration);
         for warning in &warnings {
-            eprintln!("zellij-agent-status: {warning}");
+            eprintln!("{MESSAGE_PREFIX}{warning}");
         }
         self.config = config;
         self.warnings = warnings;
@@ -60,9 +63,6 @@ impl ZellijPlugin for State {
         print!("{}", self.line(cols));
     }
 }
-
-/// メッセージの先頭に付ける、どのプラグインからの表示かを示す名前
-const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
 
 impl State {
     fn line(&self, cols: usize) -> String {

@@ -55,7 +55,7 @@ pub fn render_line<'a>(
 /// エージェント一覧の代わりに出す 1 行のメッセージ（permission の案内や設定の警告）を作る。
 /// 幅を超える分は切り詰め、末尾は背景色の空白で埋める。
 pub fn render_message(text: &str, cols: usize, theme: &Theme) -> String {
-    let spans = match clean(Some(text)) {
+    let spans = match clean(text) {
         Some(text) => clamp(
             vec![Span::new(PAD, Role::Plain), Span::new(text, Role::Msg)],
             cols,

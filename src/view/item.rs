@@ -64,15 +64,18 @@ impl Item {
     pub(super) fn new(agent: &AgentStatus, options: &ViewOptions, style: &BadgeStyle) -> Self {
         let tab_name = agent.tab_name.as_deref().filter(|_| options.show_tab_name);
         let app = agent.app.as_deref().filter(|_| options.show_app_name);
-        let name = clean(agent.title.as_deref())
-            .or_else(|| clean(tab_name))
-            .or_else(|| clean(app))
+        let name = agent
+            .title
+            .as_deref()
+            .and_then(clean)
+            .or_else(|| tab_name.and_then(clean))
+            .or_else(|| app.and_then(clean))
             .unwrap_or_else(|| format!("#{}", agent.pane_id));
         let cwd = agent
             .cwd
             .as_deref()
             .filter(|_| options.show_cwd)
-            .and_then(|cwd| clean(Some(&dir_name(cwd))));
+            .and_then(|cwd| clean(&dir_name(cwd)));
 
         let state = Role::State(agent.state);
         let mut head = vec![Span::new(style.icon(agent.state), state)];
@@ -107,7 +110,11 @@ impl Item {
             name_prefix,
             name,
             cwd,
-            msg: clean(agent.msg.as_deref()).filter(|_| options.msg_mode.shows(agent.state)),
+            msg: agent
+                .msg
+                .as_deref()
+                .and_then(clean)
+                .filter(|_| options.msg_mode.shows(agent.state)),
             msg_separator: Span::new(extent.msg_separator(), Role::Plain),
         }
     }

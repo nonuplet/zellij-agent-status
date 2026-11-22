@@ -13,8 +13,8 @@ pub(super) const ELLIPSIS: char = '~';
 /// 外部から届いた文字列を 1 行の表示用にする。
 /// 制御文字（改行や ESC など）はそのまま出すと画面が崩れるので空白に置き換える。
 /// 空になったら None。
-pub(super) fn clean(text: Option<&str>) -> Option<String> {
-    let text: String = text?
+pub(super) fn clean(text: &str) -> Option<String> {
+    let text: String = text
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();

@@ -44,6 +44,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::MESSAGE_PREFIX;
 use crate::model::{AgentState, AgentStatus};
 use zellij_tile::prelude::*;
 use zellij_utils::attention::ProgramStatusRecord;
@@ -89,7 +90,7 @@ impl Collector {
         for pane_id in self.missing_cwds() {
             let cwd = get_pane_cwd(PaneId::Terminal(pane_id))
                 .inspect_err(|e| {
-                    eprintln!("zellij-agent-status: ペイン {pane_id} の cwd を取得できません: {e}")
+                    eprintln!("{MESSAGE_PREFIX}ペイン {pane_id} の cwd を取得できません: {e}")
                 })
                 .ok();
             changed |= self.set_cwd(pane_id, cwd);
