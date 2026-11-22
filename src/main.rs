@@ -74,9 +74,9 @@ impl ZellijPlugin for State {
 impl State {
     /// 描画した行のエージェントを左クリックしたら、そのペインにフォーカスする。
     /// `focus_terminal_pane` は、ペインが別のタブにあればそのタブにも切り替える。
-    /// 描画するのは 1 行目だけなので、2 行目以降のクリックは無視する。
+    /// 行は見ない（Zellij の tab-bar と同じ）。ペインの枠などで行の番号がずれても、クリックを取りこぼさないようにするため。
     fn click(&self, mouse: Mouse) {
-        let Mouse::LeftClick(0, col) = mouse else {
+        let Mouse::LeftClick(_, col) = mouse else {
             return;
         };
         if let Some(pane_id) = self.line.pane_at(col) {
@@ -109,7 +109,9 @@ fn permission_message(permission: Permission) -> Option<&'static str> {
     match permission {
         // 許可ダイアログはこのペインに出る。ダイアログが出ている間はこの表示は見えない
         Permission::Pending => Some("permission の応答を待っています"),
-        Permission::Denied => Some("permission が許可されていないため表示できません"),
+        Permission::Denied => Some(
+            "ReadApplicationState と ChangeApplicationState が許可されていないため表示できません",
+        ),
         Permission::Granted => None,
     }
 }
