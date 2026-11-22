@@ -68,6 +68,7 @@ pane size=1 borderless=true {
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
 | `badge_name` | `true` | 状態バッジの中に、名前（と Nerd Font モードの `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
 | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、注意が必要な状態（`Blocked` / `Error`、`highlight_attention` と同じ）のエージェントだけ（`attention`）、すべて（`all`）のどれか。msg を表示しないエージェントの分の幅は、ほかの部分に回す |
+
 エージェントの名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が `false` ならタブ名 / `app` を飛ばします。Claude Code は `title` を送らないので、両方 `false` にすると名前は `#<pane_id>` になります。
 
 状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色を背景にしたバッジとして表示します（Nerd Font モードでは端を `badge_shape` の形にします）。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジになります。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。

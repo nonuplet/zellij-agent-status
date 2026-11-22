@@ -38,9 +38,9 @@ struct State {
 struct Selection {
     /// 選んでいるエージェントのペインの id
     pane_id: u32,
-    /// 選択モードに入ったときの、アクティブなタブとフォーカス中のペイン（[`Focus::focused`]）。
+    /// 選択モードに入ったときにフォーカスしていたペイン（[`focus::focused_now`]）。
     /// ほかのペインやタブがクリックされるなどして変わったら、選択モードを抜ける
-    focus: (Option<usize>, Option<PaneId>),
+    focused: PaneId,
 }
 
 register_plugin!(State);
@@ -79,7 +79,10 @@ impl ZellijPlugin for State {
             _ => {
                 self.focus.update(&event);
                 let changed = self.collector.update(&event);
-                self.leave_on_focus_change() || changed
+                // フォーカスの移動は PaneUpdate / TabUpdate で届く
+                let moved = matches!(event, Event::PaneUpdate(_) | Event::TabUpdate(_))
+                    && self.leave_on_focus_change();
+                moved || changed
             }
         }
     }
@@ -122,25 +125,18 @@ impl State {
         if self.selection.is_some() || self.permission != Permission::Granted {
             return false;
         }
-        // バックグラウンドのタブにいるインスタンスでは、イベントから求めたフォーカスが古いので、その場で問い合わせる
+        // フォーカスはその場で問い合わせる（イベントから求めると古くなることがある。select::focus を参照）
         let Some(focused) = focus::focused_now() else {
             return false;
         };
         if !self.focus.owns(focused) {
             return false;
         }
-        let focused_terminal = match focused {
-            PaneId::Terminal(id) => Some(id),
-            PaneId::Plugin(_) => None,
-        };
-        let Some(pane_id) = self.initial_selection(focused_terminal) else {
+        let Some(pane_id) = self.initial_selection(focus::terminal_id(focused)) else {
             return false;
         };
         intercept_key_presses();
-        self.selection = Some(Selection {
-            pane_id,
-            focus: self.focus.focused(),
-        });
+        self.selection = Some(Selection { pane_id, focused });
         true
     }
 
@@ -187,11 +183,15 @@ impl State {
     }
 
     /// 選択モード中にフォーカスが移ったら（ほかのペインやタブがクリックされたときなど）、選択モードを抜ける。
+    /// 入ったときと同じく、フォーカスはその場で問い合わせて比べる。問い合わせに失敗したときも抜ける
     fn leave_on_focus_change(&mut self) -> bool {
-        match &self.selection {
-            Some(selection) if selection.focus != self.focus.focused() => self.leave(),
-            _ => false,
+        let Some(selection) = &self.selection else {
+            return false;
+        };
+        if focus::focused_now() == Some(selection.focused) {
+            return false;
         }
+        self.leave()
     }
 
     /// 選んでいたエージェントが行から消えたら、最初に選ぶときと同じ順で選び直す。
@@ -203,7 +203,8 @@ impl State {
         if self.line.pane_ids().contains(&selection.pane_id) {
             return;
         }
-        match self.initial_selection(self.focus.focused_terminal()) {
+        let focused = focus::focused_now().and_then(focus::terminal_id);
+        match self.initial_selection(focused) {
             Some(pane_id) => {
                 if let Some(selection) = &mut self.selection {
                     selection.pane_id = pane_id;

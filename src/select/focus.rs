@@ -1,33 +1,27 @@
-//! フォーカスの追跡：このプラグインのタブ、アクティブなタブ、フォーカス中のペイン。
+//! フォーカスの判定：このプラグインのタブがアクティブか、フォーカス中のペインはどれか。
 //!
 //! キー操作での選択（[`crate::select`]）に使う。
-//! - パイプは全インスタンスに届くので、アクティブなタブにいるインスタンスだけが選択モードに入る
-//!   （[`Focus::owns`]）。プラグインがタブごとに起動している場合に、複数のインスタンスが
-//!   同時にキーを横取りしないようにするため
-//! - 選択モード中に、ほかのペインやタブがクリックされるなどしてフォーカスが移ったら、選択モードを抜ける（[`Focus::focused`]）
+//! - パイプは全インスタンスに届くので、アクティブなタブにいるインスタンスだけが選択モードに入る。
+//!   プラグインがタブごとに起動している場合に、複数のインスタンスが同時にキーを横取りしないようにするため
+//! - 選択モード中に、ほかのペインやタブがクリックされるなどしてフォーカスが移ったら、選択モードを抜ける
 //!
-//! ## アクティブなタブにいるかの判定
+//! ## フォーカスはその場で問い合わせる
 //!
-//! バックグラウンドのタブにいるインスタンスには `TabUpdate` が届かない（Zellij 0.46 で、ログから確かめた）。
-//! そのため、イベントから求めたアクティブなタブは、タブを離れた時点のまま古くなる。
-//! 選択モードに入るかどうかは、その場で `get_focused_pane_info` を呼んでフォーカス中のペインを問い合わせ（[`focused_now`]）、
-//! そのペインがこのプラグインのタブにあるか（[`Focus::owns`]）で決める。
+//! フォーカス中のペインは、イベント（`PaneUpdate` / `TabUpdate`）から求めず、使うたびに `get_focused_pane_info` で
+//! 問い合わせる（[`focused_now`]）。イベントから求めた値は、次の理由で古くなったりずれたりするため。
+//! - バックグラウンドのタブにいるインスタンスには `TabUpdate` が届かない（Zellij 0.46 で、ログから確かめた）。
+//!   アクティブなタブは、タブを離れた時点のまま古くなる
+//! - タブの位置は、左のタブが閉じられたり動かされたりするとずれる。`PaneUpdate` と `TabUpdate` は届く順序が
+//!   決まっていないので、一時的に別のタブの情報を引くことがある
+//!
+//! このプラグインのタブがアクティブかは、問い合わせたペインがこのプラグインのタブにあるか（[`Focus::owns`]）で決める。
 //! `get_focused_pane_info` が返すタブの番号は、位置（`TabInfo.position`）か安定した id（`TabInfo.tab_id`）かが
 //! はっきりしないので使わない。
 //!
 //! このプラグインのタブにあるペインは、`PaneUpdate` の中から自分のプラグイン id（`get_plugin_ids`）のペインを
-//! 含むタブを探して求める。
-
-use std::collections::HashMap;
+//! 含むタブを探して求める。ペインの一覧はタブの位置に依存しないので、位置がずれても影響を受けない。
 
 use zellij_tile::prelude::*;
-
-/// 1 タブ内でフォーカスしているペイン。タイルとフローティングは別々にフォーカスを持つ
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct TabFocus {
-    tiled: Option<PaneId>,
-    floating: Option<PaneId>,
-}
 
 #[derive(Debug, Default)]
 pub struct Focus {
@@ -35,12 +29,6 @@ pub struct Focus {
     plugin_id: Option<u32>,
     /// このプラグインのペインがあるタブの、すべてのペイン（このプラグイン自身を含む）
     own_panes: Vec<PaneId>,
-    /// `PaneUpdate` から求めた、タブの位置 → フォーカスしているペイン
-    panes: HashMap<usize, TabFocus>,
-    /// `TabUpdate` から求めた、アクティブなタブの位置
-    active_tab: Option<usize>,
-    /// `TabUpdate` から求めた、フローティングのペインを表示しているタブの位置
-    floating_visible: Vec<usize>,
 }
 
 impl Focus {
@@ -51,63 +39,23 @@ impl Focus {
         }
     }
 
-    /// `PaneUpdate` / `TabUpdate` を受け取ったときに呼ぶ。ほかのイベントは無視する。
+    /// `PaneUpdate` を受け取ったときに呼ぶ。ほかのイベントは無視する。
     pub fn update(&mut self, event: &Event) {
-        match event {
-            Event::PaneUpdate(manifest) => {
-                self.panes = manifest
-                    .panes
-                    .iter()
-                    .map(|(&tab, panes)| (tab, tab_focus(panes)))
-                    .collect();
-                if let Some(plugin_id) = self.plugin_id {
-                    self.own_panes = manifest
-                        .panes
-                        .values()
-                        .find(|panes| panes.iter().any(|p| p.is_plugin && p.id == plugin_id))
-                        .map(|panes| panes.iter().map(pane_id).collect())
-                        .unwrap_or_default();
-                }
-            }
-            Event::TabUpdate(tabs) => {
-                self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
-                self.floating_visible = tabs
-                    .iter()
-                    .filter(|t| t.are_floating_panes_visible)
-                    .map(|t| t.position)
-                    .collect();
-            }
-            _ => {}
-        }
+        let (Event::PaneUpdate(manifest), Some(plugin_id)) = (event, self.plugin_id) else {
+            return;
+        };
+        self.own_panes = manifest
+            .panes
+            .values()
+            .find(|panes| panes.iter().any(|p| p.is_plugin && p.id == plugin_id))
+            .map(|panes| panes.iter().map(pane_id).collect())
+            .unwrap_or_default();
     }
 
     /// `pane` がこのプラグインのタブにあるか。[`focused_now`] と合わせて、このプラグインのタブがアクティブかを判定する。
     /// まだ `PaneUpdate` が届いていなければ false
     pub fn owns(&self, pane: PaneId) -> bool {
         self.own_panes.contains(&pane)
-    }
-
-    /// イベントから求めた、アクティブなタブと、そのタブでフォーカスしているペイン。
-    /// フローティングのペインを表示していれば、フローティングのほうのフォーカスを使う。
-    /// バックグラウンドのタブにいるインスタンスでは古くなる（モジュールの説明を参照）
-    pub fn focused(&self) -> (Option<usize>, Option<PaneId>) {
-        let pane = self.active_tab.and_then(|tab| {
-            let focus = self.panes.get(&tab)?;
-            if self.floating_visible.contains(&tab) {
-                focus.floating
-            } else {
-                focus.tiled
-            }
-        });
-        (self.active_tab, pane)
-    }
-
-    /// フォーカスしているターミナルペインの id
-    pub fn focused_terminal(&self) -> Option<u32> {
-        match self.focused().1 {
-            Some(PaneId::Terminal(id)) => Some(id),
-            _ => None,
-        }
     }
 }
 
@@ -125,6 +73,14 @@ pub fn focused_now() -> Option<PaneId> {
         .map(|(_, pane)| pane)
 }
 
+/// ターミナルペインなら、その id
+pub fn terminal_id(pane: PaneId) -> Option<u32> {
+    match pane {
+        PaneId::Terminal(id) => Some(id),
+        PaneId::Plugin(_) => None,
+    }
+}
+
 fn pane_id(pane: &PaneInfo) -> PaneId {
     if pane.is_plugin {
         PaneId::Plugin(pane.id)
@@ -133,29 +89,14 @@ fn pane_id(pane: &PaneInfo) -> PaneId {
     }
 }
 
-fn tab_focus(panes: &[PaneInfo]) -> TabFocus {
-    let focused = |floating: bool| {
-        panes
-            .iter()
-            .find(|p| p.is_focused && p.is_floating == floating && !p.is_suppressed)
-            .map(pane_id)
-    };
-    TabFocus {
-        tiled: focused(false),
-        floating: focused(true),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn pane(id: u32, is_plugin: bool, is_focused: bool, is_floating: bool) -> PaneInfo {
+    fn pane(id: u32, is_plugin: bool) -> PaneInfo {
         PaneInfo {
             id,
             is_plugin,
-            is_focused,
-            is_floating,
             ..Default::default()
         }
     }
@@ -166,33 +107,10 @@ mod tests {
         })
     }
 
-    fn tab_update(active: usize, floating_visible: &[usize], count: usize) -> Event {
-        Event::TabUpdate(
-            (0..count)
-                .map(|position| TabInfo {
-                    position,
-                    active: position == active,
-                    are_floating_panes_visible: floating_visible.contains(&position),
-                    ..Default::default()
-                })
-                .collect(),
-        )
-    }
-
     fn two_tabs() -> Event {
         pane_update(vec![
-            (
-                0,
-                vec![
-                    pane(1, false, true, false),
-                    pane(7, true, false, false),
-                    pane(2, false, true, true),
-                ],
-            ),
-            (
-                1,
-                vec![pane(3, false, true, false), pane(8, true, false, false)],
-            ),
+            (0, vec![pane(1, false), pane(7, true), pane(2, false)]),
+            (1, vec![pane(3, false), pane(8, true)]),
         ])
     }
 
@@ -209,12 +127,6 @@ mod tests {
         assert!(!focus.owns(PaneId::Terminal(1)));
         assert!(!focus.owns(PaneId::Plugin(7)));
 
-        // TabUpdate（アクティブなタブ）には左右されない。
-        // バックグラウンドのタブには TabUpdate が届かず、古くなるため
-        focus.update(&tab_update(0, &[], 2));
-        assert!(focus.owns(PaneId::Terminal(3)));
-        assert!(!focus.owns(PaneId::Terminal(1)));
-
         // 自分のペインが見つからなければ、どのペインも自分のタブのものとみなさない
         let mut focus = Focus::new(99);
         focus.update(&two_tabs());
@@ -223,29 +135,21 @@ mod tests {
     }
 
     #[test]
-    fn focused_pane_follows_active_tab_and_floating_layer() {
+    fn tab_position_does_not_matter() {
+        // 左のタブが閉じられて、自分のタブの位置が 1 から 0 にずれても、同じペインを持つ
         let mut focus = Focus::new(8);
-        assert_eq!(focus.focused(), (None, None));
-
         focus.update(&two_tabs());
-        focus.update(&tab_update(0, &[], 2));
-        assert_eq!(focus.focused(), (Some(0), Some(PaneId::Terminal(1))));
-        assert_eq!(focus.focused_terminal(), Some(1));
+        focus.update(&pane_update(vec![(0, vec![pane(3, false), pane(8, true)])]));
+        assert!(focus.owns(PaneId::Terminal(3)));
 
-        // フローティングを表示していれば、フローティングのフォーカス
-        focus.update(&tab_update(0, &[0], 2));
-        assert_eq!(focus.focused_terminal(), Some(2));
-
-        focus.update(&tab_update(1, &[0], 2));
-        assert_eq!(focus.focused(), (Some(1), Some(PaneId::Terminal(3))));
+        // TabUpdate は見ない
+        focus.update(&Event::TabUpdate(vec![TabInfo::default()]));
+        assert!(focus.owns(PaneId::Terminal(3)));
     }
 
     #[test]
-    fn focused_plugin_pane_is_not_a_terminal() {
-        let mut focus = Focus::new(8);
-        focus.update(&pane_update(vec![(0, vec![pane(5, true, true, false)])]));
-        focus.update(&tab_update(0, &[], 1));
-        assert_eq!(focus.focused(), (Some(0), Some(PaneId::Plugin(5))));
-        assert_eq!(focus.focused_terminal(), None);
+    fn terminal_id_of_pane() {
+        assert_eq!(terminal_id(PaneId::Terminal(3)), Some(3));
+        assert_eq!(terminal_id(PaneId::Plugin(3)), None);
     }
 }
