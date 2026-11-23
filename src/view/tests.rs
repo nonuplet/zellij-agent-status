@@ -79,11 +79,12 @@ fn paint_colors_spans_and_fills_width() {
     );
     assert_eq!(strip_ansi(&line).trim_end(), "  ✗  claude");
 
-    // Nerd Font モードの app のアイコンは太字にしない。バッジの中では反転させ、外では前景色
+    // app のアイコンは太字にしない。バッジの中では反転させ、外では前景色
     let mut a = agent(1, AgentState::Error);
     a.app = Some("claude-code".to_owned());
     let nerd = ViewOptions {
-        nerd_font: true,
+        badge_shape: BadgeShape::Slash,
+        show_app_icon: true,
         ..Default::default()
     };
     let line = painted(&[a.clone()], 20, &nerd);
@@ -103,7 +104,7 @@ fn paint_colors_spans_and_fills_width() {
         line_without.contains("\x1b[0;38;5;7;48;2;1;2;3m\u{ec82}"),
         "{line_without:?}"
     );
-    // バッジの端の文字（既定の slash）は、行の背景の上に状態の色の前景色で描き、太字にしない
+    // Nerd Font の端の文字は、行の背景の上に状態の色の前景色で描き、太字にしない
     assert!(
         line.contains("\x1b[0;38;5;1;48;2;1;2;3m\u{e0ba}"),
         "{line:?}"
@@ -290,7 +291,7 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
 fn selection_mode_hides_badge_ends_of_unselected_agents() {
     let a = [agent(1, AgentState::Error), agent(2, AgentState::Idle)];
     let nerd = ViewOptions {
-        nerd_font: true,
+        badge_shape: BadgeShape::Slash,
         ..Default::default()
     };
     let line = render_line(&a, 40, &nerd);

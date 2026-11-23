@@ -8,11 +8,11 @@ use crate::model::AgentState;
 pub(super) enum Role {
     /// 余白や区切り
     Plain,
-    /// 名前の前の `app` のアイコン（Nerd Font モード）
+    /// 名前の前の `app` のアイコン
     App,
     /// 状態アイコンと進捗。状態の色で塗る。
     State(AgentState),
-    /// バッジの端の文字（[`BadgeEnds`](super::badge::BadgeEnds)）。状態の色で塗る（太字にしない）。
+    /// バッジの端の文字（[`BadgeShape`](super::badge::BadgeShape)）。状態の色で塗る（太字にしない）。
     BadgeEnd(AgentState),
     Name,
     Cwd,

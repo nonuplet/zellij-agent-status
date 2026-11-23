@@ -8,9 +8,13 @@ use crate::model::{AgentState, AgentStatus};
 /// 各設定のユーザ向けの説明は README の「設定」にあり、ここには実装上の意味だけを書く。
 /// バッジ・アイコンに関わる設定は互いに依存するので、view では直接読まず、
 /// [`BadgeStyle`](super::badge::BadgeStyle) で組み合わせを解決してから使う。
+///
+/// 設定の `nerd_font` は、[`ViewOptions::icons`] / [`ViewOptions::badge_shape`] / [`ViewOptions::show_app_icon`] の
+/// 既定値を切り替えるだけなので、ここには持たない（切り替えは config で済ませる）。
+/// [`ViewOptions::default`] は `nerd_font` が false のときの既定値。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewOptions {
-    /// 状態アイコンの種類。`nerd_font` による既定値の切り替えは config で済ませてある
+    /// 状態アイコンの種類
     pub icons: IconStyle,
     /// 表示する `app`。None なら絞り込まない
     pub apps: Option<Vec<String>>,
@@ -26,11 +30,10 @@ pub struct ViewOptions {
     pub max_length: Option<usize>,
     /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
-    /// Nerd Font モード。バッジの端を [`ViewOptions::badge_shape`] の形にし、名前の前に
-    /// `app` のアイコンを付ける。状態アイコン（[`ViewOptions::icons`]）は config 側で切り替える。
-    pub nerd_font: bool,
-    /// Nerd Font モードのバッジの端の形。`nerd_font` が false なら使わない
+    /// バッジの端の形。絵文字アイコン（バッジにしない）では使わない
     pub badge_shape: BadgeShape,
+    /// 名前の前に `app` のアイコンを付けるか。名前の候補（[`ViewOptions::show_app_name`]）とは独立
+    pub show_app_icon: bool,
     /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
     /// グリフが 1 桁からはみ出すかどうかはプログラムからは判別できないため、設定にしている。
     pub nerd_font_icon_padding: bool,
@@ -82,8 +85,8 @@ impl Default for ViewOptions {
             blocked_first: false,
             max_length: Some(DEFAULT_MAX_LENGTH),
             show_cwd: false,
-            nerd_font: false,
             badge_shape: BadgeShape::default(),
+            show_app_icon: false,
             nerd_font_icon_padding: false,
             highlight_attention: false,
             badge_name: true,

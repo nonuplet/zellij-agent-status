@@ -1,7 +1,7 @@
 //! 1 エージェント分の表示内容：何を表示するかを決め、Span 列を組み立てる。
 //!
 //! 1 エージェント分は `アイコン 進捗 名前 (cwd): msg` の形（進捗・cwd・msg はあるときだけ）。
-//! Nerd Font モードでは、名前の前に `app` のアイコンを付けて `<app> 名前 (cwd)` の形にする（対応するアイコンがあるときだけ）。
+//! [`ViewOptions::show_app_icon`] が true なら、名前の前に `app` のアイコンを付けて `<app> 名前 (cwd)` の形にする（対応するアイコンがあるときだけ）。
 //! `app` のアイコンは名前と一体で扱い、名前を省くときは一緒に省く。
 //! [`ViewOptions::nerd_font_icon_padding`] が true なら、Nerd Font のアイコン（状態アイコンと `app` のアイコン）の
 //! 右隣に必ず空白を置く（`[<icon> ] <app>  名前: msg`。[`app_icon`](super::icon::app_icon) を参照）。
@@ -99,8 +99,8 @@ impl Item {
         name_prefix.push(Span::new(" ", Role::Plain));
 
         let (left, right) = style
-            .ends()
-            .map_or_else(Default::default, |e| e.spans(agent.state));
+            .shape()
+            .map_or_else(Default::default, |s| s.spans(agent.state));
         let extent = style.extent(agent.state);
         Item {
             pane_id: agent.pane_id,
@@ -201,6 +201,7 @@ impl Item {
 mod tests {
     use super::*;
     use crate::view::MIN_MAX_LENGTH;
+    use crate::view::badge::BadgeShape;
     use crate::view::fit::MIN_NAME_WIDTH;
     use crate::view::icon::IconStyle;
     use crate::view::test_support::{agent, icons, option_combinations};
@@ -221,11 +222,12 @@ mod tests {
                 item.head_width() + item.name_overhead() + MIN_NAME_WIDTH
             })
             .collect();
-        // 最も広いのは、Nerd Font モードで絵文字以外の状態アイコン（バッジの端あり）を選び、
-        // アイコンの後ろに空白を置くとき
+        // 最も広いのは、絵文字以外の状態アイコン（バッジの端あり）で、バッジの端を Nerd Font の文字にし、
+        // app のアイコンを付けて、その後ろに空白を置くとき
         assert_eq!(widths.iter().max(), Some(&MIN_MAX_LENGTH));
         let options = ViewOptions {
-            nerd_font: true,
+            badge_shape: BadgeShape::Slash,
+            show_app_icon: true,
             nerd_font_icon_padding: true,
             ..icons(IconStyle::Nerd)
         };

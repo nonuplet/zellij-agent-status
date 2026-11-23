@@ -1,14 +1,13 @@
 //! 状態バッジ：状態アイコンから名前（と `app` のアイコン・cwd）までを、状態の色で背景を塗ったバッジ
 //! （`[↻ 42% 名前 (cwd)] msg`）にする。Span の組み立ては [`Item::spans`](super::item::Item::spans) で行う。
 //!
-//! バッジ・アイコンに関わる設定（`icons` / `nerd_font` / `badge_shape` / `badge_name` / `highlight_attention` /
+//! バッジ・アイコンに関わる設定（`icons` / `badge_shape` / `show_app_icon` / `badge_name` / `highlight_attention` /
 //! `nerd_font_icon_padding`）は互いに依存するので、その組み合わせは [`BadgeStyle::new`] でまとめて解決する。
 //! [`Item`](super::item::Item) は解決した結果だけを見る。
 //!
 //! バッジの右端が名前と msg の境目になるので、間は `: ` ではなく空白 1 つにする
 //! （[`BadgeExtent::msg_separator`]）。
-//! バッジの両端には端の文字（[`BadgeEnds`]。Nerd Font モードでは [`ViewOptions::badge_shape`] の形）を付ける。
-//! Nerd Font モードでは、両端の文字の内側（左端の後ろと右端の手前）に塗った空白を 1 つずつ置く（[`BadgeEnds::spans`]）。
+//! バッジの両端には [`ViewOptions::badge_shape`] の形の端の文字を付ける（[`BadgeShape::spans`]）。
 //! 絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、バッジにせず端の文字も付けない。
 //!
 //! 名前までバッジに入れるのは、アイコンの右がバッジの右端の文字に重なったり切れたりするのを避けるため。
@@ -28,14 +27,17 @@ use super::icon::{IconStyle, app_icon};
 use super::span::{Fill, Role, Span};
 use crate::model::AgentState;
 
-/// Nerd Font モードのバッジの端の形。
+/// バッジの端の形。どれも左右に 1 桁ずつの端の文字を付ける。
 ///
-/// 端の文字は前景色を状態の色にして行の背景の上に描き、状態の色の背景（バッジの内側）と行の背景の境目にする。
-/// そのため Powerline の塗りつぶしの文字がそのまま使える。どの文字も 1 桁として扱う（`unicode-width` の `width()` と同じ）。
+/// [`BadgeShape::Square`] 以外は Nerd Font の文字を使う（[`BadgeShape::glyphs`]）。
+/// 前景色を状態の色にして行の背景の上に描き、状態の色の背景（バッジの内側）と行の背景の境目にするので、
+/// Powerline の塗りつぶしの文字がそのまま使える。どの文字も 1 桁として扱う（`unicode-width` の `width()` と同じ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BadgeShape {
-    /// `nf-ple-lower_right_triangle`（U+E0BA）/ `nf-ple-upper_left_triangle`（U+E0BC）
+    /// 状態の色で塗った空白。フォントによらず使える
     #[default]
+    Square,
+    /// `nf-ple-lower_right_triangle`（U+E0BA）/ `nf-ple-upper_left_triangle`（U+E0BC）
     Slash,
     /// `nf-pl-right_hard_divider`（U+E0B2）/ `nf-pl-left_hard_divider`（U+E0B0）
     Arrow,
@@ -44,41 +46,29 @@ pub enum BadgeShape {
 }
 
 impl BadgeShape {
-    /// (左端, 右端) の文字
-    pub(super) fn glyphs(self) -> (&'static str, &'static str) {
+    /// (左端, 右端) の Nerd Font の文字。[`BadgeShape::Square`] は Nerd Font の文字を使わないので None
+    pub(super) fn glyphs(self) -> Option<(&'static str, &'static str)> {
         match self {
-            BadgeShape::Slash => ("\u{e0ba}", "\u{e0bc}"),
-            BadgeShape::Arrow => ("\u{e0b2}", "\u{e0b0}"),
-            BadgeShape::Round => ("\u{e0b6}", "\u{e0b4}"),
+            BadgeShape::Square => None,
+            BadgeShape::Slash => Some(("\u{e0ba}", "\u{e0bc}")),
+            BadgeShape::Arrow => Some(("\u{e0b2}", "\u{e0b0}")),
+            BadgeShape::Round => Some(("\u{e0b6}", "\u{e0b4}")),
         }
     }
-}
 
-/// バッジの両端に付ける文字。どちらも左右 1 桁ずつ。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BadgeEnds {
-    /// 空白を状態の色で塗る
-    Space,
-    /// Nerd Font モードの端の文字（[`ViewOptions::badge_shape`]）。
-    /// 前景色を状態の色にして、行の背景の上に描く。
-    Glyph(BadgeShape),
-}
-
-impl BadgeEnds {
     /// (左端, 右端) の Span。Nerd Font の端の文字では、内側の空白も含める。
     /// 右端は名前を入れたり強調したりすると後ろに移るので、内側の空白も一緒に移す。
     pub(super) fn spans(self, state: AgentState) -> (Vec<Span>, Vec<Span>) {
         let role = Role::BadgeEnd(state);
-        match self {
+        match self.glyphs() {
             // 空白の端はそれ自体が余白なので、内側に空白を置かない（置くと余白が広すぎる）
-            BadgeEnds::Space => {
+            None => {
                 let space = Span::new(" ", role).with_fill(Fill::State(state));
                 (vec![space.clone()], vec![space])
             }
             // Nerd Font の端の文字は前景色で描くので中の文字との間に余白がなく、詰まって見える。
             // そのため両端の文字の内側（左端の後ろと右端の手前）に、塗った空白を置く
-            BadgeEnds::Glyph(shape) => {
-                let (left, right) = shape.glyphs();
+            Some((left, right)) => {
                 let pad = Span::new(" ", Role::State(state)).with_fill(Fill::State(state));
                 (
                     vec![Span::new(left, role), pad.clone()],
@@ -131,13 +121,13 @@ impl BadgeExtent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct BadgeStyle {
     icons: IconStyle,
-    /// バッジの端の文字。絵文字アイコンなら None（バッジにしない）
-    ends: Option<BadgeEnds>,
+    /// バッジの端の形。絵文字アイコンなら None（バッジにしない）
+    shape: Option<BadgeShape>,
     /// 強調しないエージェントでバッジに入れる範囲
     extent: BadgeExtent,
     /// [`ViewOptions::highlight_attention`]
     highlight: bool,
-    /// 名前の前に `app` のアイコンを付けるか（Nerd Font モード）
+    /// 名前の前に `app` のアイコンを付けるか（[`ViewOptions::show_app_icon`]）
     app_icon: bool,
     /// Nerd Font のアイコンの右隣に空白を置くか（[`ViewOptions::nerd_font_icon_padding`]）
     icon_padding: bool,
@@ -145,23 +135,22 @@ pub(super) struct BadgeStyle {
 
 impl BadgeStyle {
     pub(super) fn new(options: &ViewOptions) -> Self {
-        let ends = match (options.icons, options.nerd_font) {
-            (IconStyle::Emoji, _) => None,
-            (_, true) => Some(BadgeEnds::Glyph(options.badge_shape)),
-            (_, false) => Some(BadgeEnds::Space),
+        // badge_shape と badge_name は、バッジにしない（絵文字アイコン）ときは効かない
+        let shape = match options.icons {
+            IconStyle::Emoji => None,
+            _ => Some(options.badge_shape),
         };
-        // badge_name は、バッジにしない（絵文字アイコン）ときは効かない
-        let extent = match ends {
+        let extent = match shape {
             None => BadgeExtent::None,
             Some(_) if options.badge_name => BadgeExtent::Label,
             Some(_) => BadgeExtent::Head,
         };
         BadgeStyle {
             icons: options.icons,
-            ends,
+            shape,
             extent,
             highlight: options.highlight_attention,
-            app_icon: options.nerd_font,
+            app_icon: options.show_app_icon,
             icon_padding: options.nerd_font_icon_padding,
         }
     }
@@ -170,8 +159,8 @@ impl BadgeStyle {
         self.icons.icon(state)
     }
 
-    pub(super) fn ends(&self) -> Option<BadgeEnds> {
-        self.ends
+    pub(super) fn shape(&self) -> Option<BadgeShape> {
+        self.shape
     }
 
     /// 状態が `state` のエージェントでバッジに入れる範囲。
@@ -191,7 +180,7 @@ impl BadgeStyle {
         self.icon_padding && self.icons == IconStyle::Nerd && !has_progress
     }
 
-    /// 名前の前に付ける `app` のアイコン（Nerd Font モードで、対応するアイコンがあるときだけ）
+    /// 名前の前に付ける `app` のアイコン（[`ViewOptions::show_app_icon`] が true で、対応するアイコンがあるときだけ）
     pub(super) fn app_icon(&self, app: Option<&str>) -> Option<&'static str> {
         app.filter(|_| self.app_icon).and_then(app_icon)
     }
@@ -215,11 +204,11 @@ mod tests {
             (BadgeShape::Round, ["\u{e0b6}", "\u{e0b4}"]),
         ];
         for (shape, expected) in cases {
-            let (left, right) = shape.glyphs();
+            let (left, right) = shape.glyphs().unwrap();
             assert_eq!([left, right], expected, "{shape:?}");
             assert_nerd_font_glyph(left);
             assert_nerd_font_glyph(right);
         }
-        assert_eq!(BadgeShape::default(), BadgeShape::Slash);
+        assert_eq!(BadgeShape::Square.glyphs(), None);
     }
 }

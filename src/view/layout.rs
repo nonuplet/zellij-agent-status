@@ -15,7 +15,7 @@ use crate::model::{AgentState, AgentStatus};
 
 /// 行頭の余白（[`render_message`](super::render_message) でも使う）
 pub(super) const PAD: &str = " ";
-/// エージェント同士の区切り。Nerd Font モードでも同じ（エージェントの境目はバッジで見分けられるため）
+/// エージェント同士の区切り。バッジの端の形によらず同じ（エージェントの境目はバッジで見分けられるため）
 const SEPARATOR: &str = "  ";
 
 /// [`ViewOptions::shows`] が true のエージェントだけを、(タブ, ペイン) の順に並べる。

@@ -9,7 +9,10 @@
 //!
 //! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/fit.rs`）で固定している。
 //!
-//! 不正な値は、そのキーだけ既定値に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
+//! `nerd_font` は `icon_style` / `badge_shape` / `show_app_icon` の既定値を切り替えるだけで、どれも指定すればそちらを優先する。
+//! [`ViewOptions`] には切り替えた結果だけを入れ、`nerd_font` 自体は渡さない。
+//!
+//! 不正な値は、そのキーだけ既定値（`nerd_font` で変わるものは、切り替えた後の既定値）に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
 //! 未知のキーは無視する（Zellij 側が予約キー以外を渡してくる可能性を排除できていないため、警告もしない）。
 
 use std::collections::BTreeMap;
@@ -34,13 +37,17 @@ impl Config {
             warnings: Vec::new(),
         };
 
-        // icon_style の既定値が変わるので、icon_style より先に読む
-        r.read("nerd_font", &mut view.nerd_font, parse_bool);
-        if view.nerd_font {
+        // ほかのキーの既定値が変わるので、最初に読む
+        let mut nerd_font = false;
+        r.read("nerd_font", &mut nerd_font, parse_bool);
+        if nerd_font {
             view.icons = IconStyle::Nerd;
+            view.badge_shape = BadgeShape::Slash;
+            view.show_app_icon = true;
         }
         r.read("icon_style", &mut view.icons, choice(ICON_STYLES));
         r.read("badge_shape", &mut view.badge_shape, choice(BADGE_SHAPES));
+        r.read("show_app_icon", &mut view.show_app_icon, parse_bool);
         r.read("apps", &mut view.apps, |value| Ok(parse_apps(value)));
         r.read("show_app_name", &mut view.show_app_name, parse_bool);
         r.read("show_tab_name", &mut view.show_tab_name, parse_bool);
@@ -107,6 +114,7 @@ const ICON_STYLES: &[(&str, IconStyle)] = &[
 ];
 
 const BADGE_SHAPES: &[(&str, BadgeShape)] = &[
+    ("square", BadgeShape::Square),
     ("slash", BadgeShape::Slash),
     ("arrow", BadgeShape::Arrow),
     ("round", BadgeShape::Round),
@@ -169,9 +177,9 @@ mod tests {
 
     type Field = fn(&ViewOptions) -> bool;
 
-    /// 真偽値の設定と、そのフィールド
+    /// 真偽値の設定と、そのフィールド（`nerd_font` は対応するフィールドがないので、別のテストで確かめる）
     const BOOL_KEYS: &[(&str, Field)] = &[
-        ("nerd_font", |view| view.nerd_font),
+        ("show_app_icon", |view| view.show_app_icon),
         ("show_app_name", |view| view.show_app_name),
         ("show_tab_name", |view| view.show_tab_name),
         ("blocked_first", |view| view.blocked_first),
@@ -192,8 +200,8 @@ mod tests {
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_length, Some(DEFAULT_MAX_LENGTH));
         assert!(!config.view.show_cwd);
-        assert!(!config.view.nerd_font);
-        assert_eq!(config.view.badge_shape, BadgeShape::Slash);
+        assert_eq!(config.view.badge_shape, BadgeShape::Square);
+        assert!(!config.view.show_app_icon);
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
         assert!(config.view.badge_name);
@@ -248,7 +256,7 @@ mod tests {
             (
                 "badge_shape",
                 ">",
-                "badge_shape: `>` は使えません。`slash`・`arrow`・`round` のどれかを指定してください（既定値を使います）",
+                "badge_shape: `>` は使えません。`square`・`slash`・`arrow`・`round` のどれかを指定してください（既定値を使います）",
             ),
             (
                 "msg_mode",
@@ -273,6 +281,8 @@ mod tests {
         let (_, warnings) = Config::from_configuration(&configuration(&[
             ("msg_mode", "x"),
             ("max_length", "x"),
+            ("show_app_icon", "x"),
+            ("badge_shape", "x"),
             ("icon_style", "x"),
             ("nerd_font", "x"),
         ]));
@@ -280,59 +290,116 @@ mod tests {
             .iter()
             .map(|w| w.split(':').next().unwrap())
             .collect();
-        assert_eq!(keys, ["nerd_font", "icon_style", "max_length", "msg_mode"]);
+        assert_eq!(
+            keys,
+            [
+                "nerd_font",
+                "icon_style",
+                "badge_shape",
+                "show_app_icon",
+                "max_length",
+                "msg_mode"
+            ]
+        );
     }
 
-    #[test]
-    fn nerd_font_switches_default_icon_style() {
-        let (config, warnings) =
-            Config::from_configuration(&configuration(&[("nerd_font", "true")]));
-        assert!(warnings.is_empty());
-        assert!(config.view.nerd_font);
-        assert_eq!(config.view.icons, IconStyle::Nerd);
-
-        let (config, warnings) =
-            Config::from_configuration(&configuration(&[("nerd_font", "false")]));
-        assert!(warnings.is_empty());
-        assert!(!config.view.nerd_font);
-        assert_eq!(config.view.icons, IconStyle::Symbol);
-    }
-
-    #[test]
-    fn invalid_nerd_font_keeps_default_icon_style() {
-        for value in ["yes", "True", "1", ""] {
-            let (config, _) = Config::from_configuration(&configuration(&[("nerd_font", value)]));
-            assert_eq!(config.view.icons, IconStyle::Symbol, "{value}");
+    /// `nerd_font` が true のときの既定値
+    fn nerd_font_defaults() -> ViewOptions {
+        ViewOptions {
+            icons: IconStyle::Nerd,
+            badge_shape: BadgeShape::Slash,
+            show_app_icon: true,
+            ..Default::default()
         }
     }
 
     #[test]
-    fn explicit_icon_style_wins_over_nerd_font() {
-        let (config, warnings) = Config::from_configuration(&configuration(&[
-            ("nerd_font", "true"),
-            ("icon_style", "emoji"),
-        ]));
-        assert!(warnings.is_empty());
-        assert!(config.view.nerd_font);
-        assert_eq!(config.view.icons, IconStyle::Emoji);
-
-        // nerd_font なしで状態アイコンだけ Nerd Font にもできる
-        let (config, warnings) =
-            Config::from_configuration(&configuration(&[("icon_style", "nerd")]));
-        assert!(warnings.is_empty());
-        assert!(!config.view.nerd_font);
-        assert_eq!(config.view.icons, IconStyle::Nerd);
+    fn nerd_font_only_switches_defaults() {
+        let cases = [
+            ("true", nerd_font_defaults()),
+            ("false", ViewOptions::default()),
+        ];
+        for (value, expected) in cases {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("nerd_font", value)]));
+            assert!(warnings.is_empty(), "{value}");
+            assert_eq!(config.view, expected, "{value}");
+        }
     }
 
     #[test]
-    fn invalid_icon_style_falls_back_to_nerd_in_nerd_font_mode() {
-        let (config, warnings) = Config::from_configuration(&configuration(&[
-            ("nerd_font", "true"),
-            ("icon_style", "emoticon"),
-        ]));
-        assert_eq!(config.view.icons, IconStyle::Nerd);
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].starts_with("icon_style:"));
+    fn invalid_nerd_font_keeps_defaults_with_warning() {
+        for value in ["yes", "True", "1", "no", "False", "0", ""] {
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("nerd_font", value)]));
+            assert_eq!(config.view, ViewOptions::default(), "{value}");
+            assert_eq!(warnings.len(), 1, "{value}");
+            assert!(warnings[0].starts_with("nerd_font:"), "{value}");
+        }
+    }
+
+    #[test]
+    fn explicit_values_win_over_nerd_font() {
+        for (nerd_font, defaults) in [
+            ("true", nerd_font_defaults()),
+            ("false", ViewOptions::default()),
+        ] {
+            let read = |key, value| {
+                let (config, warnings) = Config::from_configuration(&configuration(&[
+                    ("nerd_font", nerd_font),
+                    (key, value),
+                ]));
+                assert!(warnings.is_empty(), "{nerd_font} {key} {value}");
+                config.view
+            };
+            // 指定したものだけが変わり、ほかの 2 つは nerd_font に応じた既定値のまま
+            for &(value, icons) in ICON_STYLES {
+                let expected = ViewOptions {
+                    icons,
+                    ..defaults.clone()
+                };
+                assert_eq!(read("icon_style", value), expected, "{nerd_font} {value}");
+            }
+            for &(value, badge_shape) in BADGE_SHAPES {
+                let expected = ViewOptions {
+                    badge_shape,
+                    ..defaults.clone()
+                };
+                assert_eq!(read("badge_shape", value), expected, "{nerd_font} {value}");
+            }
+            for (value, show_app_icon) in [("true", true), ("false", false)] {
+                let expected = ViewOptions {
+                    show_app_icon,
+                    ..defaults.clone()
+                };
+                assert_eq!(
+                    read("show_app_icon", value),
+                    expected,
+                    "{nerd_font} {value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_values_fall_back_to_defaults_for_nerd_font() {
+        for (nerd_font, defaults) in [
+            ("true", nerd_font_defaults()),
+            ("false", ViewOptions::default()),
+        ] {
+            for key in ["icon_style", "badge_shape", "show_app_icon"] {
+                let (config, warnings) = Config::from_configuration(&configuration(&[
+                    ("nerd_font", nerd_font),
+                    (key, "x"),
+                ]));
+                assert_eq!(config.view, defaults, "{nerd_font} {key}");
+                assert_eq!(warnings.len(), 1, "{nerd_font} {key}");
+                assert!(
+                    warnings[0].starts_with(&format!("{key}:")),
+                    "{nerd_font} {key}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -367,15 +434,14 @@ mod tests {
     #[test]
     fn badge_shape() {
         let cases = [
+            ("square", BadgeShape::Square),
             ("slash", BadgeShape::Slash),
             ("arrow", BadgeShape::Arrow),
             ("round", BadgeShape::Round),
         ];
         for (value, expected) in cases {
-            let (config, warnings) = Config::from_configuration(&configuration(&[
-                ("nerd_font", "true"),
-                ("badge_shape", value),
-            ]));
+            let (config, warnings) =
+                Config::from_configuration(&configuration(&[("badge_shape", value)]));
             assert!(warnings.is_empty(), "{value}");
             assert_eq!(config.view.badge_shape, expected, "{value}");
         }
@@ -383,14 +449,18 @@ mod tests {
 
     #[test]
     fn invalid_badge_shape_falls_back_to_default_with_warning() {
-        for value in ["Arrow", "space", ">", ""] {
+        for value in ["Arrow", "none", ">", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("badge_shape", value),
-                ("nerd_font", "true"),
+                ("apps", "claude"),
             ]));
-            assert_eq!(config.view.badge_shape, BadgeShape::Slash, "{value}");
+            assert_eq!(config.view.badge_shape, BadgeShape::Square, "{value}");
             // 他のキーは影響を受けない
-            assert!(config.view.nerd_font, "{value}");
+            assert_eq!(
+                config.view.apps,
+                Some(vec!["claude".to_string()]),
+                "{value}"
+            );
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("badge_shape:"), "{value}");
         }
