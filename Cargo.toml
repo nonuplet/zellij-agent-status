@@ -14,6 +14,11 @@ zellij-utils = "0.46.0"
 # zellij-utils が依存しているものと同じバージョンにそろえている。
 unicode-width = "0.2.3"
 
+# 幅の総当たりのテストで zellij_tile::graphemes（実体は zellij-utils）を大量に呼ぶため、最適化して速くする。
+# unicode-segmentation / unicode-width を最適化しても、ほとんど速くならない。
+[profile.dev.package.zellij-utils]
+opt-level = 2
+
 [profile.release]
 opt-level = "s"
 lto = true
