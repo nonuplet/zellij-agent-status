@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use super::span::{Fill, Role, Span};
 use super::theme::{Color, Theme};
@@ -48,7 +48,7 @@ pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme, selected: Option
         let bold = if bold { "1;" } else { "" };
         // String への write! は失敗しないので、結果は捨てる
         let _ = write!(out, "\x1b[0;{bold}{fg};{bg}m{}", span.text);
-        used += span.text.width();
+        used += display_width(&span.text);
     }
     let _ = write!(
         out,

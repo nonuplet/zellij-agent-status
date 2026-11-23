@@ -1,7 +1,7 @@
 //! 描画の結果（[`render_line`] / [`render_message`] の出力を [`Line::paint`] したもの。色を含む）と、
 //! クリックの判定（[`Line::pane_at`]）のテスト。
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use super::test_support::{agent, with_msg};
 use super::theme::Color;
@@ -60,7 +60,7 @@ fn paint_colors_spans_and_fills_width() {
     );
     assert!(line.ends_with("\x1b[0m"));
     let visible = strip_ansi(&line);
-    assert_eq!(visible.width(), 20);
+    assert_eq!(display_width(&visible), 20);
     assert_eq!(visible.trim_end(), "  ✗ claude");
 
     // 名前をバッジに入れなければ、アイコンの直後が右端の空白で、名前は前景色のまま
@@ -145,14 +145,19 @@ fn message_is_cleaned_truncated_and_filled() {
     let message =
         |text, cols| strip_ansi(&render_message(text, cols).paint(&Theme::default(), None));
     let visible = message("設定の\n警告です", 12);
-    assert_eq!(visible.width(), 12);
+    assert_eq!(display_width(&visible), 12);
     assert_eq!(visible, " 設定の 警~ ");
 
     assert_eq!(message("ok", 5), " ok  ");
     assert_eq!(message(" \n", 3), "   ");
-    for cols in 0..30 {
-        let visible = message("permission を待っています", cols);
-        assert_eq!(visible.width(), cols, "cols={cols}");
+    for text in [
+        "permission を待っています",
+        "❤\u{fe0f}❤\u{fe0f}❤\u{fe0f}❤\u{fe0f}",
+    ] {
+        for cols in 0..30 {
+            let visible = message(text, cols);
+            assert_eq!(display_width(&visible), cols, "{text:?} cols={cols}");
+        }
     }
 }
 
@@ -255,7 +260,7 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
     assert!(
         selected.ends_with(&format!(
             "\x1b[0;48;5;236m{}\x1b[0m",
-            " ".repeat(40 - strip_ansi(&unselected).trim_end().width())
+            " ".repeat(40 - display_width(strip_ansi(&unselected).trim_end()))
         )),
         "{selected:?}"
     );

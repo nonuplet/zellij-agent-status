@@ -1,6 +1,6 @@
 //! 描画の中間表現：[`layout`](mod@super::layout) が作り、[`paint`](mod@super::paint) が色を付ける Span。
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use crate::model::AgentState;
 
@@ -62,5 +62,5 @@ impl Span {
 
 /// Span 列の表示幅
 pub(super) fn width(spans: &[Span]) -> usize {
-    spans.iter().map(|s| s.text.width()).sum()
+    spans.iter().map(|s| display_width(&s.text)).sum()
 }

@@ -13,7 +13,7 @@
 //!
 //! どこまでをバッジにするかは [`badge`](super::badge)、幅に合わせた縮め方は [`fit`](super::fit) を参照。
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use super::ViewOptions;
 use super::badge::{BadgeExtent, BadgeStyle};
@@ -124,9 +124,9 @@ impl Item {
     /// 各部分を切り詰めずに表示するときの幅
     pub(super) fn widths(&self) -> Widths {
         Widths {
-            name: Some(self.name.width()),
-            cwd: self.cwd.as_ref().map(|c| c.width()),
-            msg: self.msg.as_ref().map(|m| m.width()),
+            name: Some(display_width(&self.name)),
+            cwd: self.cwd.as_deref().map(display_width),
+            msg: self.msg.as_deref().map(display_width),
         }
     }
 
@@ -145,12 +145,12 @@ impl Item {
     /// どのエージェントでも同じだが、名前・msg に付く部分と同じ形（`fn(&Item) -> usize`）で
     /// [`fit`](super::fit) に渡すため、メソッドにしている。
     pub(super) fn cwd_overhead(&self) -> usize {
-        CWD_OPEN.width() + CWD_CLOSE.width()
+        display_width(CWD_OPEN) + display_width(CWD_CLOSE)
     }
 
     /// msg に付く部分（前の区切り）の幅
     pub(super) fn msg_overhead(&self) -> usize {
-        self.msg_separator.text.width()
+        display_width(&self.msg_separator.text)
     }
 
     /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
