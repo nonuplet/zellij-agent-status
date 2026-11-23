@@ -34,10 +34,10 @@ mod test_support;
 mod tests;
 
 pub use badge::BadgeShape;
-pub use fit::MIN_MAX_LENGTH;
-pub use icon::IconStyle;
+pub use fit::MIN_MAX_AGENT_WIDTH;
+pub use icon::StateIconStyle;
 pub use line::Line;
-pub use options::{DEFAULT_MAX_LENGTH, MsgMode, ViewOptions};
+pub use options::{DEFAULT_MAX_AGENT_WIDTH, MsgMode, ViewOptions};
 pub use theme::Theme;
 
 use crate::model::AgentStatus;

@@ -2,9 +2,9 @@
 
 use crate::model::AgentState;
 
-/// アイコンの種類。
+/// 状態アイコンの種類。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum IconStyle {
+pub enum StateIconStyle {
     /// 記号。East Asian Width が Ambiguous の文字（`●` など）は、端末によって幅がずれるので使わない。
     #[default]
     Symbol,
@@ -17,44 +17,44 @@ pub enum IconStyle {
     Emoji,
     /// Nerd Font のアイコン（Font Awesome 系）。幅は 1 桁として扱う（[`app_icon`] を参照）。
     /// 設定によっては右隣に空白を置く（`Item` で付ける。[`app_icon`] を参照）。
-    Nerd,
+    NerdFont,
 }
 
-impl IconStyle {
+impl StateIconStyle {
     pub(super) fn icon(self, state: AgentState) -> &'static str {
         match (self, state) {
             // バッジ（反転した背景）の上でも形が分かるよう、線の細い記号（`◌` / `⟳`）は避けている
-            (IconStyle::Symbol, AgentState::Idle) => "⋯",
-            (IconStyle::Symbol, AgentState::Working) => "↻",
-            (IconStyle::Symbol, AgentState::Blocked) => "!",
-            (IconStyle::Symbol, AgentState::Done) => "✓",
-            (IconStyle::Symbol, AgentState::Error) => "✗",
-            (IconStyle::Alphabet, AgentState::Idle) => "I",
-            (IconStyle::Alphabet, AgentState::Working) => "W",
-            (IconStyle::Alphabet, AgentState::Blocked) => "B",
-            (IconStyle::Alphabet, AgentState::Done) => "D",
-            (IconStyle::Alphabet, AgentState::Error) => "E",
-            (IconStyle::Emoji, AgentState::Idle) => "💤",
-            (IconStyle::Emoji, AgentState::Working) => "⏳",
-            (IconStyle::Emoji, AgentState::Blocked) => "❗",
-            (IconStyle::Emoji, AgentState::Done) => "✅",
-            (IconStyle::Emoji, AgentState::Error) => "❌",
+            (StateIconStyle::Symbol, AgentState::Idle) => "⋯",
+            (StateIconStyle::Symbol, AgentState::Working) => "↻",
+            (StateIconStyle::Symbol, AgentState::Blocked) => "!",
+            (StateIconStyle::Symbol, AgentState::Done) => "✓",
+            (StateIconStyle::Symbol, AgentState::Error) => "✗",
+            (StateIconStyle::Alphabet, AgentState::Idle) => "I",
+            (StateIconStyle::Alphabet, AgentState::Working) => "W",
+            (StateIconStyle::Alphabet, AgentState::Blocked) => "B",
+            (StateIconStyle::Alphabet, AgentState::Done) => "D",
+            (StateIconStyle::Alphabet, AgentState::Error) => "E",
+            (StateIconStyle::Emoji, AgentState::Idle) => "💤",
+            (StateIconStyle::Emoji, AgentState::Working) => "⏳",
+            (StateIconStyle::Emoji, AgentState::Blocked) => "❗",
+            (StateIconStyle::Emoji, AgentState::Done) => "✅",
+            (StateIconStyle::Emoji, AgentState::Error) => "❌",
             // nf-fa-moon_o
-            (IconStyle::Nerd, AgentState::Idle) => "\u{f186}",
+            (StateIconStyle::NerdFont, AgentState::Idle) => "\u{f186}",
             // nf-fa-gear
-            (IconStyle::Nerd, AgentState::Working) => "\u{f013}",
+            (StateIconStyle::NerdFont, AgentState::Working) => "\u{f013}",
             // nf-fa-exclamation_triangle
-            (IconStyle::Nerd, AgentState::Blocked) => "\u{f071}",
+            (StateIconStyle::NerdFont, AgentState::Blocked) => "\u{f071}",
             // nf-fa-check
-            (IconStyle::Nerd, AgentState::Done) => "\u{f00c}",
+            (StateIconStyle::NerdFont, AgentState::Done) => "\u{f00c}",
             // nf-fa-times
-            (IconStyle::Nerd, AgentState::Error) => "\u{f00d}",
+            (StateIconStyle::NerdFont, AgentState::Error) => "\u{f00d}",
         }
     }
 }
 
 /// `app` ごとのアイコン（Nerd Font の文字）。対応がなければ None（アイコンを出さない）。
-/// 付けるかどうかは `show_app_icon` で決まり、状態アイコンの種類（[`IconStyle`]）には関係しない。
+/// 付けるかどうかは `show_app_icon` で決まり、状態アイコンの種類（[`StateIconStyle`]）には関係しない。
 ///
 /// Nerd Font の文字は Private Use Area にあり、East Asian Width は Ambiguous
 /// （`unicode-width` の `width()` は 1、`width_cjk()` は 2）。幅は 1 桁として扱う。
@@ -90,16 +90,20 @@ mod tests {
     #[test]
     fn symbols_are_one_column_wide() {
         for state in STATES {
-            assert_eq!(IconStyle::Symbol.icon(state).width(), 1, "{state:?}");
+            assert_eq!(StateIconStyle::Symbol.icon(state).width(), 1, "{state:?}");
             // 端末によって幅が変わらないこと（Ambiguous でないこと）
-            assert_eq!(IconStyle::Symbol.icon(state).width_cjk(), 1, "{state:?}");
+            assert_eq!(
+                StateIconStyle::Symbol.icon(state).width_cjk(),
+                1,
+                "{state:?}"
+            );
         }
     }
 
     #[test]
     fn emojis_are_two_columns_wide_without_variation_selector() {
         for state in STATES {
-            let icon = IconStyle::Emoji.icon(state);
+            let icon = StateIconStyle::Emoji.icon(state);
             // 1 文字だけで、異体字セレクタ（U+FE0F）に頼らないこと
             assert_eq!(icon.chars().count(), 1, "{state:?}");
             assert_eq!(icon.width(), 2, "{state:?}");
@@ -110,7 +114,7 @@ mod tests {
     #[test]
     fn nerd_icons_are_nerd_font_glyphs() {
         for state in STATES {
-            assert_nerd_font_glyph(IconStyle::Nerd.icon(state));
+            assert_nerd_font_glyph(StateIconStyle::NerdFont.icon(state));
         }
     }
 

@@ -5,8 +5,8 @@
 #   scripts/osc7501-demo.sh 0.5 codex  # 間隔と app 名を指定する
 #
 # 複数エージェントの並びを見たいときは、ペインごとに app 名を変えて実行する。
-# プラグインの設定で apps を指定していると、既定の app 名（demo）は表示されない。
-# apps を外すか、apps に含まれる app 名を指定する。
+# プラグインの設定で app_filter を指定していると、既定の app 名（demo）は表示されない。
+# app_filter を外すか、app_filter に含まれる app 名を指定する。
 set -euo pipefail
 
 interval="${1:-2}"

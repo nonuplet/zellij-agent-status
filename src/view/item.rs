@@ -58,13 +58,13 @@ pub(super) struct Item {
 
 impl Item {
     /// 名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決める
-    /// （`show_tab_name` が false ならタブ名を、`show_app_name` が false なら `app` を飛ばす）。
+    /// （`use_tab_name` が false ならタブ名を、`use_app_name` が false なら `app` を飛ばす）。
     /// Claude Code は `title` を送らないため、タブ名で複数のエージェントを見分けられるようにしている。
     /// cwd と msg は名前に続けて表示するので、名前は必ずある（最後は `#<pane_id>`）ようにしている。
-    /// `app` のアイコンは名前の候補とは別なので、`show_app_name` に関係なく付ける。
+    /// `app` のアイコンは名前の候補とは別なので、`use_app_name` に関係なく付ける。
     pub(super) fn new(agent: &AgentStatus, options: &ViewOptions, style: &BadgeStyle) -> Self {
-        let tab_name = agent.tab_name.as_deref().filter(|_| options.show_tab_name);
-        let app = agent.app.as_deref().filter(|_| options.show_app_name);
+        let tab_name = agent.tab_name.as_deref().filter(|_| options.use_tab_name);
+        let app = agent.app.as_deref().filter(|_| options.use_app_name);
         let name = agent
             .title
             .as_deref()
@@ -200,18 +200,18 @@ impl Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::MIN_MAX_LENGTH;
+    use crate::view::MIN_MAX_AGENT_WIDTH;
     use crate::view::badge::BadgeShape;
     use crate::view::fit::MIN_NAME_WIDTH;
-    use crate::view::icon::IconStyle;
-    use crate::view::test_support::{agent, icons, option_combinations};
+    use crate::view::icon::StateIconStyle;
+    use crate::view::test_support::{agent, option_combinations, state_icons};
 
     fn item(agent: &AgentStatus, options: &ViewOptions) -> Item {
         Item::new(agent, options, &BadgeStyle::new(options))
     }
 
     #[test]
-    fn min_max_length_fits_widest_head_and_min_name() {
+    fn min_max_agent_width_fits_widest_head_and_min_name() {
         let mut a = agent(1, AgentState::Blocked);
         a.app = Some("claude-code".to_owned());
         a.progress = Some(u8::MAX);
@@ -224,18 +224,18 @@ mod tests {
             .collect();
         // 最も広いのは、絵文字以外の状態アイコン（バッジの端あり）で、バッジの端を Nerd Font の文字にし、
         // app のアイコンを付けて、その後ろに空白を置くとき
-        assert_eq!(widths.iter().max(), Some(&MIN_MAX_LENGTH));
+        assert_eq!(widths.iter().max(), Some(&MIN_MAX_AGENT_WIDTH));
         let options = ViewOptions {
             badge_shape: BadgeShape::Slash,
             show_app_icon: true,
             nerd_font_icon_padding: true,
-            ..icons(IconStyle::Nerd)
+            ..state_icons(StateIconStyle::NerdFont)
         };
         let item = item(&a, &options);
         assert!(item.name_prefix.iter().any(|s| s.role == Role::App));
         assert_eq!(
             item.head_width() + item.name_overhead() + MIN_NAME_WIDTH,
-            MIN_MAX_LENGTH
+            MIN_MAX_AGENT_WIDTH
         );
     }
 }

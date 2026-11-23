@@ -7,7 +7,7 @@
 
 - 最新版（2026-11 時点）は OSC 7501 を自分で送る。hooks などの設定は不要。
 - `title` は送らず、`app`（`claude-code`）だけを送る。そのため名前にはペインがあるタブの名前が表示される（同じタブに複数いると同じ名前が並ぶ）。
-- 設定の `apps "claude-code"` で絞り込める。
+- 設定の `app_filter "claude-code"` で絞り込める。
 - Claude Code を終了してシェルに戻ると、約 2 秒で表示が消える（Zellij の挙動。[osc7501-findings.md](osc7501-findings.md) の「レコードが消えるタイミング」）。
 
 ### 状態と、その状況の起こし方

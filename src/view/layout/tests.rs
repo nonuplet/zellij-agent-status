@@ -2,11 +2,13 @@
 
 use super::*;
 use crate::view::badge::BadgeShape;
-use crate::view::icon::{IconStyle, app_icon};
+use crate::view::icon::{StateIconStyle, app_icon};
 use crate::view::span::Fill;
-use crate::view::test_support::{agent, base, icons, option_combinations, with_cwd, with_msg};
+use crate::view::test_support::{
+    agent, base, option_combinations, state_icons, with_cwd, with_msg,
+};
 use crate::view::text::ELLIPSIS;
-use crate::view::{DEFAULT_MAX_LENGTH, MIN_MAX_LENGTH, MsgMode};
+use crate::view::{DEFAULT_MAX_AGENT_WIDTH, MIN_MAX_AGENT_WIDTH, MsgMode};
 
 fn plain(agents: &[AgentStatus], cols: usize) -> String {
     plain_with(agents, cols, &base())
@@ -55,8 +57,8 @@ fn icon_per_state() {
         (AgentState::Done, "✓", "D", "✅"),
         (AgentState::Error, "✗", "E", "❌"),
     ];
-    let alphabet = icons(IconStyle::Alphabet);
-    let emoji = icons(IconStyle::Emoji);
+    let alphabet = state_icons(StateIconStyle::Alphabet);
+    let emoji = state_icons(StateIconStyle::Emoji);
     for (state, symbol, letter, emoji_icon) in cases {
         let a = [agent(1, state)];
         assert_eq!(plain(&a, 80), format!(" [{symbol} claude]"));
@@ -67,7 +69,7 @@ fn icon_per_state() {
 
 #[test]
 fn emoji_icons_are_counted_as_two_columns() {
-    let emoji = icons(IconStyle::Emoji);
+    let emoji = state_icons(StateIconStyle::Emoji);
     let mut a = agent(1, AgentState::Working);
     a.title = Some("long-project-name".to_owned());
     let b = agent(2, AgentState::Done);
@@ -81,7 +83,7 @@ fn emoji_icons_are_counted_as_two_columns() {
 
 #[test]
 fn emoji_icon_is_not_split_at_line_end() {
-    let emoji = icons(IconStyle::Emoji);
+    let emoji = state_icons(StateIconStyle::Emoji);
     let agents: Vec<_> = (0..5).map(|i| agent(i, AgentState::Idle)).collect();
     assert_eq!(plain_with(&agents, 8, &emoji), " 💤  💤~");
     // 残り 1 桁には幅 2 のアイコンが入らないので、その手前で切る
@@ -114,7 +116,7 @@ fn tab_name_is_cleaned_and_skipped_when_empty() {
 #[test]
 fn hidden_app_is_skipped_as_name() {
     let hide_app = ViewOptions {
-        show_app_name: false,
+        use_app_name: false,
         ..base()
     };
     let mut a = with_msg(agent(7, AgentState::Idle), "waiting");
@@ -128,7 +130,7 @@ fn hidden_app_is_skipped_as_name() {
 #[test]
 fn hidden_tab_name_is_skipped_as_name() {
     let hide_tab_name = ViewOptions {
-        show_tab_name: false,
+        use_tab_name: false,
         ..base()
     };
     let mut a = agent(7, AgentState::Idle);
@@ -147,8 +149,8 @@ fn hidden_tab_name_is_skipped_as_name() {
 #[test]
 fn hidden_tab_name_and_app_fall_back_from_title_to_pane_id() {
     let hide_both = ViewOptions {
-        show_tab_name: false,
-        show_app_name: false,
+        use_tab_name: false,
+        use_app_name: false,
         ..base()
     };
     let mut a = agent(7, AgentState::Idle);
@@ -173,14 +175,14 @@ fn tab_name_does_not_affect_order_or_filter() {
     // 同じタブに複数いると同じ名前が並ぶ（既知の制限）
     assert_eq!(plain(&agents, 80), " [⋯ z]  [⋯ z]  [⋯ a]");
     let only_claude = ViewOptions {
-        apps: Some(vec!["claude".to_owned()]),
+        app_filter: Some(vec!["claude".to_owned()]),
         ..base()
     };
     assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ z]  [⋯ a]");
 
     // タブ名を名前の候補から外しても、並び順と絞り込みは変わらない
     let hide_tab_name = ViewOptions {
-        show_tab_name: false,
+        use_tab_name: false,
         ..base()
     };
     assert_eq!(
@@ -188,7 +190,7 @@ fn tab_name_does_not_affect_order_or_filter() {
         " [⋯ claude]  [⋯ codex]  [⋯ claude]"
     );
     let only_claude = ViewOptions {
-        show_tab_name: false,
+        use_tab_name: false,
         ..only_claude
     };
     assert_eq!(
@@ -206,13 +208,13 @@ fn hidden_app_does_not_affect_filter() {
     let agents = [agent(1, AgentState::Idle), codex, no_app];
 
     let only_claude = ViewOptions {
-        apps: Some(vec!["claude".to_owned()]),
-        show_app_name: false,
+        app_filter: Some(vec!["claude".to_owned()]),
+        use_app_name: false,
         ..base()
     };
     assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ #1]");
     let hide_app = ViewOptions {
-        show_app_name: false,
+        use_app_name: false,
         ..base()
     };
     assert_eq!(
@@ -221,11 +223,11 @@ fn hidden_app_does_not_affect_filter() {
     );
 }
 
-/// 行の幅による縮め方を見るため、`max_length` の上限はなくしておく
+/// 行の幅による縮め方を見るため、`max_agent_width` の上限はなくしておく
 fn show_cwd() -> ViewOptions {
     ViewOptions {
         show_cwd: true,
-        max_length: None,
+        max_agent_width: None,
         ..base()
     }
 }
@@ -379,7 +381,7 @@ fn blocked_first_keeps_blocked_visible_when_line_is_cut() {
 }
 
 #[test]
-fn filtered_by_apps() {
+fn filtered_by_app_filter() {
     let mut codex = agent(2, AgentState::Idle);
     codex.app = Some("codex".to_owned());
     let mut no_app = agent(3, AgentState::Idle);
@@ -387,7 +389,7 @@ fn filtered_by_apps() {
     let agents = [agent(1, AgentState::Idle), codex, no_app];
 
     let only_claude = ViewOptions {
-        apps: Some(vec!["claude".to_owned()]),
+        app_filter: Some(vec!["claude".to_owned()]),
         ..base()
     };
     assert_eq!(plain_with(&agents, 80, &only_claude), " [⋯ claude]");
@@ -473,9 +475,9 @@ fn never_exceeds_width() {
     }
 }
 
-fn max_length(max_length: usize) -> ViewOptions {
+fn max_agent_width(max_agent_width: usize) -> ViewOptions {
     ViewOptions {
-        max_length: Some(max_length),
+        max_agent_width: Some(max_agent_width),
         ..base()
     }
 }
@@ -496,41 +498,50 @@ fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> V
 }
 
 #[test]
-fn max_length_truncates_msg_first() {
+fn max_agent_width_truncates_msg_first() {
     let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
     let b = with_msg(agent(2, AgentState::Blocked), "short");
     // "[↻ claude] " (11) + msg 11 = 22。短い方はそのまま
     assert_eq!(
-        plain_with(&[a, b], 80, &max_length(22)),
+        plain_with(&[a, b], 80, &max_agent_width(22)),
         " [↻ claude] abcdefghij~  [! claude] short"
     );
 }
 
 #[test]
-fn max_length_drops_msg_then_truncates_name() {
+fn max_agent_width_drops_msg_then_truncates_name() {
     let mut a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
     // msg に回せる幅が 5（MIN_MSG_WIDTH 未満）なので省く
-    assert_eq!(plain_with(&[a.clone()], 80, &max_length(16)), " [↻ claude]");
+    assert_eq!(
+        plain_with(&[a.clone()], 80, &max_agent_width(16)),
+        " [↻ claude]"
+    );
     // 収まる msg なら MIN_MSG_WIDTH 未満の幅でも表示する
     let short = with_msg(agent(1, AgentState::Working), "ok");
-    assert_eq!(plain_with(&[short], 80, &max_length(16)), " [↻ claude] ok");
+    assert_eq!(
+        plain_with(&[short], 80, &max_agent_width(16)),
+        " [↻ claude] ok"
+    );
 
     a.title = Some("long-project-name".to_owned());
-    assert_eq!(plain_with(&[a], 80, &max_length(16)), " [↻ long-projec~]");
+    assert_eq!(
+        plain_with(&[a], 80, &max_agent_width(16)),
+        " [↻ long-projec~]"
+    );
 }
 
 #[test]
-fn max_length_counts_icon_and_progress() {
+fn max_agent_width_counts_icon_and_progress() {
     let mut a = with_msg(agent(1, AgentState::Working), "Running");
     a.title = Some("my-project".to_owned());
     a.progress = Some(100);
     assert_eq!(
-        plain_with(&[a.clone()], 80, &max_length(MIN_MAX_LENGTH)),
+        plain_with(&[a.clone()], 80, &max_agent_width(MIN_MAX_AGENT_WIDTH)),
         " [↻ 100% my-proje~]"
     );
     let emoji = ViewOptions {
-        icons: IconStyle::Emoji,
-        ..max_length(MIN_MAX_LENGTH)
+        state_icon_style: StateIconStyle::Emoji,
+        ..max_agent_width(MIN_MAX_AGENT_WIDTH)
     };
     // 絵文字はバッジの端がない分、名前に回せる幅が広い
     assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-project");
@@ -539,8 +550,8 @@ fn max_length_counts_icon_and_progress() {
     let nerd = ViewOptions {
         badge_shape: BadgeShape::Slash,
         show_app_icon: true,
-        icons: IconStyle::Nerd,
-        ..max_length(MIN_MAX_LENGTH)
+        state_icon_style: StateIconStyle::NerdFont,
+        ..max_agent_width(MIN_MAX_AGENT_WIDTH)
     };
     assert_eq!(
         plain_with(&[a.clone()], 80, &nerd),
@@ -558,10 +569,10 @@ fn max_length_counts_icon_and_progress() {
 }
 
 #[test]
-fn max_length_is_combined_with_row_width() {
+fn max_agent_width_is_combined_with_row_width() {
     let a = with_msg(agent(1, AgentState::Working), "abcdefghijklmnopqrst");
     let b = with_msg(agent(2, AgentState::Blocked), "short");
-    let options = max_length(22);
+    let options = max_agent_width(22);
     // 上限で切り詰めた幅（msg 11 と 5）を、行の幅に合わせてさらに均等に縮める
     assert_eq!(
         plain_with(&[a.clone(), b.clone()], 38, &options),
@@ -571,7 +582,7 @@ fn max_length_is_combined_with_row_width() {
 }
 
 #[test]
-fn max_length_defaults_to_50_and_none_is_unlimited() {
+fn max_agent_width_defaults_to_50_and_none_is_unlimited() {
     let msg = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     let a = with_msg(agent(1, AgentState::Working), msg);
     // "[↻ claude] " (11) + msg 39 = 50
@@ -580,7 +591,7 @@ fn max_length_defaults_to_50_and_none_is_unlimited() {
         " [↻ claude] abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL~"
     );
     let unlimited = ViewOptions {
-        max_length: None,
+        max_agent_width: None,
         ..base()
     };
     assert_eq!(
@@ -590,25 +601,25 @@ fn max_length_defaults_to_50_and_none_is_unlimited() {
 }
 
 #[test]
-fn max_length_leaves_short_agents_unchanged() {
+fn max_agent_width_leaves_short_agents_unchanged() {
     let a = with_msg(agent(1, AgentState::Done), "ok");
-    assert_eq!(plain_with(&[a], 80, &max_length(40)), " [✓ claude] ok");
+    assert_eq!(plain_with(&[a], 80, &max_agent_width(40)), " [✓ claude] ok");
 }
 
-fn max_length_with_cwd(max: usize) -> ViewOptions {
+fn max_agent_width_with_cwd(max: usize) -> ViewOptions {
     ViewOptions {
         show_cwd: true,
-        ..max_length(max)
+        ..max_agent_width(max)
     }
 }
 
 #[test]
-fn max_length_drops_msg_then_truncates_cwd_then_drops_cwd() {
+fn max_agent_width_drops_msg_then_truncates_cwd_then_drops_cwd() {
     let a = with_msg(
         with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
         "Running tests",
     );
-    let line = |max| plain_with(std::slice::from_ref(&a), 80, &max_length_with_cwd(max));
+    let line = |max| plain_with(std::slice::from_ref(&a), 80, &max_agent_width_with_cwd(max));
 
     assert_eq!(line(41), " [↻ claude (feature-branch)] Running tests");
     // msg を切り詰める（MIN_MSG_WIDTH まで）
@@ -622,16 +633,16 @@ fn max_length_drops_msg_then_truncates_cwd_then_drops_cwd() {
     let mut long = a.clone();
     long.title = Some("long-project-name".to_owned());
     assert_eq!(
-        plain_with(&[long], 80, &max_length_with_cwd(16)),
+        plain_with(&[long], 80, &max_agent_width_with_cwd(16)),
         " [↻ long-projec~]"
     );
 }
 
 #[test]
-fn max_length_with_cwd_is_combined_with_row_width() {
+fn max_agent_width_with_cwd_is_combined_with_row_width() {
     let a = with_cwd(agent(1, AgentState::Working), "/repo/feature-branch");
     let b = with_cwd(agent(2, AgentState::Done), "/repo/main");
-    let options = max_length_with_cwd(22);
+    let options = max_agent_width_with_cwd(22);
     // 上限で切り詰めた cwd（9 と 4）を、行の幅に合わせてさらに均等に縮める
     assert_eq!(
         plain_with(&[a.clone(), b.clone()], 80, &options),
@@ -644,12 +655,12 @@ fn max_length_with_cwd_is_combined_with_row_width() {
 }
 
 #[test]
-fn never_exceeds_max_length() {
+fn never_exceeds_max_agent_width() {
     let agents = mixed_agents();
     for base in option_combinations() {
-        for max in MIN_MAX_LENGTH..40 {
+        for max in MIN_MAX_AGENT_WIDTH..40 {
             let options = ViewOptions {
-                max_length: Some(max),
+                max_agent_width: Some(max),
                 ..base.clone()
             };
             for cols in 0..100 {
@@ -669,7 +680,7 @@ fn nerd_font(badge_shape: BadgeShape) -> ViewOptions {
     ViewOptions {
         badge_shape,
         show_app_icon: true,
-        ..icons(IconStyle::Nerd)
+        ..state_icons(StateIconStyle::NerdFont)
     }
 }
 
@@ -700,12 +711,12 @@ fn show_app_icon_puts_app_icon_before_name() {
         " [ \u{f013} \u{ec82} claude-code (main) ] Running tests"
     );
     // バッジに名前を入れなくても、app のアイコンは名前の前（msg の前は `: `）
-    let no_badge_name = ViewOptions {
-        badge_name: false,
+    let no_name_in_badge = ViewOptions {
+        name_in_badge: false,
         ..options
     };
     assert_eq!(
-        plain_with(&with_dir, 80, &no_badge_name),
+        plain_with(&with_dir, 80, &no_name_in_badge),
         " [ \u{f013} ] \u{ec82} claude-code (main): Running tests"
     );
     // show_app_icon が false なら、ほかを Nerd Font の文字にしていても app のアイコンを付けない
@@ -720,14 +731,14 @@ fn show_app_icon_puts_app_icon_before_name() {
 }
 
 #[test]
-fn icon_style_badge_shape_and_app_icon_are_independent() {
+fn state_icon_style_badge_shape_and_app_icon_are_independent() {
     let mut a = with_msg(agent(1, AgentState::Blocked), "msg");
     a.app = Some("claude-code".to_owned());
     let a = [a];
     let styles = [
-        (IconStyle::Symbol, "!"),
-        (IconStyle::Alphabet, "B"),
-        (IconStyle::Nerd, "\u{f071}"),
+        (StateIconStyle::Symbol, "!"),
+        (StateIconStyle::Alphabet, "B"),
+        (StateIconStyle::NerdFont, "\u{f071}"),
     ];
     let shapes = [
         (BadgeShape::Square, " ", " "),
@@ -735,9 +746,9 @@ fn icon_style_badge_shape_and_app_icon_are_independent() {
         (BadgeShape::Arrow, "\u{e0b2} ", " \u{e0b0}"),
         (BadgeShape::Round, "\u{e0b6} ", " \u{e0b4}"),
     ];
-    let raw = |icons, badge_shape, show_app_icon| -> String {
+    let raw = |state_icon_style, badge_shape, show_app_icon| -> String {
         let options = ViewOptions {
-            icons,
+            state_icon_style,
             badge_shape,
             show_app_icon,
             ..base()
@@ -758,7 +769,7 @@ fn icon_style_badge_shape_and_app_icon_are_independent() {
             }
             // 絵文字アイコンはバッジにならないので、badge_shape は効かない
             assert_eq!(
-                raw(IconStyle::Emoji, shape, show_app_icon),
+                raw(StateIconStyle::Emoji, shape, show_app_icon),
                 format!(" ❗ {app_icon}claude-code: msg"),
                 "{shape:?} {show_app_icon}"
             );
@@ -767,11 +778,11 @@ fn icon_style_badge_shape_and_app_icon_are_independent() {
 }
 
 #[test]
-fn app_icon_ignores_show_app_name() {
+fn app_icon_ignores_use_app_name() {
     let mut a = agent(7, AgentState::Idle);
     a.app = Some("claude-code".to_owned());
     let options = ViewOptions {
-        show_app_name: false,
+        use_app_name: false,
         ..nerd_font(BadgeShape::Slash)
     };
     assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186} \u{ec82} #7 ]");
@@ -785,7 +796,7 @@ fn nerd_font_widths_are_counted_when_shortening() {
     let b = agent(2, AgentState::Done);
     let agents = [a, b];
     let options = ViewOptions {
-        max_length: None,
+        max_agent_width: None,
         ..nerd_font(BadgeShape::Slash)
     };
     // 固定部分：" " (1) + "[ \u{f013} ]" (5) + "  " (2) + "[ \u{f00c} ]" (5) = 13
@@ -849,7 +860,7 @@ fn nerd_font_icon_padding_adds_space_after_icons() {
         " [ \u{f071}  claude-code ] Allow?  [ \u{f00c} 42% claude-code (main) ]"
     );
     let app_icon_only = ViewOptions {
-        icons: IconStyle::Symbol,
+        state_icon_style: StateIconStyle::Symbol,
         ..padded.clone()
     };
     assert_eq!(
@@ -880,7 +891,7 @@ fn nerd_font_icon_padding_puts_space_after_every_nerd_icon() {
     let states = [Idle, Working, Blocked, Done, Error];
     let icons: Vec<char> = states
         .iter()
-        .map(|&s| IconStyle::Nerd.icon(s))
+        .map(|&s| StateIconStyle::NerdFont.icon(s))
         .chain(app_icon("claude-code"))
         .flat_map(str::chars)
         .collect();
@@ -947,14 +958,18 @@ const SHAPES: [BadgeShape; 3] = [BadgeShape::Slash, BadgeShape::Arrow, BadgeShap
 #[test]
 fn badge_ends_follow_badge_shape() {
     let a = [agent(1, AgentState::Working)];
-    let shaped = |badge_shape, icons| ViewOptions {
+    let shaped = |badge_shape, state_icon_style| ViewOptions {
         badge_shape,
-        icons,
+        state_icon_style,
         ..base()
     };
     // 既定は空白
     assert_eq!(badge_ends(&a, &base()), [" ", " "]);
-    for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Nerd] {
+    for style in [
+        StateIconStyle::Symbol,
+        StateIconStyle::Alphabet,
+        StateIconStyle::NerdFont,
+    ] {
         let square = shaped(BadgeShape::Square, style);
         assert_eq!(badge_ends(&a, &square), [" ", " "], "{style:?}");
         for shape in SHAPES {
@@ -969,7 +984,7 @@ fn badge_ends_follow_badge_shape() {
     // 絵文字はバッジにしない
     for shape in [BadgeShape::Square].into_iter().chain(SHAPES) {
         assert!(
-            badge_ends(&a, &shaped(shape, IconStyle::Emoji)).is_empty(),
+            badge_ends(&a, &shaped(shape, StateIconStyle::Emoji)).is_empty(),
             "{shape:?}"
         );
     }
@@ -980,18 +995,25 @@ fn badge_without_name_fills_icon_and_progress() {
     let mut a = with_msg(agent(1, AgentState::Working), "Running");
     a.progress = Some(42);
     let a = [a];
-    let options = without_badge_name(base());
+    let options = without_name_in_badge(base());
     assert_eq!(plain_with(&a, 80, &options), " [↻ 42%] claude: Running");
     assert_eq!(filled_runs(&a, 80, &options), [" ↻ 42% "]);
     // Nerd Font の端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
     for shape in SHAPES {
         assert_eq!(
-            filled_runs(&a, 80, &without_badge_name(nerd_font(shape))),
+            filled_runs(&a, 80, &without_name_in_badge(nerd_font(shape))),
             [" \u{f013} 42% "],
             "{shape:?}"
         );
     }
-    assert!(filled_runs(&a, 80, &without_badge_name(icons(IconStyle::Emoji))).is_empty());
+    assert!(
+        filled_runs(
+            &a,
+            80,
+            &without_name_in_badge(state_icons(StateIconStyle::Emoji))
+        )
+        .is_empty()
+    );
 }
 
 fn highlight(options: ViewOptions) -> ViewOptions {
@@ -1010,8 +1032,8 @@ fn highlight_attention_fills_whole_blocked_and_error_agents() {
             a.msg = Some("Allow Bash?".to_owned());
         }
     }
-    // 強調の範囲が分かりやすいよう、名前はバッジに入れない（入れるときは badge_name_with_highlight_attention）
-    let base = without_badge_name(base());
+    // 強調の範囲が分かりやすいよう、名前はバッジに入れない（入れるときは name_in_badge_with_highlight_attention）
+    let base = without_name_in_badge(base());
     let options = highlight(base.clone());
     let line = plain_with(&agents, 80, &options);
     assert_eq!(line, " [⋯] a  [! b: Allow Bash?]  [↻] c  [✓] d  [✗ e]");
@@ -1059,7 +1081,7 @@ fn highlight_attention_with_emoji_fills_without_ends() {
         with_msg(agent(1, AgentState::Error), "failed"),
         agent(2, AgentState::Done),
     ];
-    let options = highlight(icons(IconStyle::Emoji));
+    let options = highlight(state_icons(StateIconStyle::Emoji));
     assert_eq!(
         plain_with(&agents, 80, &options),
         " ❌ claude: failed  ✅ claude"
@@ -1067,15 +1089,15 @@ fn highlight_attention_with_emoji_fills_without_ends() {
     assert_eq!(filled_runs(&agents, 80, &options), ["❌ claude: failed"]);
 }
 
-fn without_badge_name(options: ViewOptions) -> ViewOptions {
+fn without_name_in_badge(options: ViewOptions) -> ViewOptions {
     ViewOptions {
-        badge_name: false,
+        name_in_badge: false,
         ..options
     }
 }
 
 #[test]
-fn badge_name_puts_name_into_badge() {
+fn name_in_badge_puts_name_into_badge() {
     let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
     a.progress = Some(42);
     let mut b = agent(2, AgentState::Done);
@@ -1089,8 +1111,8 @@ fn badge_name_puts_name_into_badge() {
         filled_runs(&agents, 80, &base()),
         [" ↻ 42% claude ", " ✓ codex "]
     );
-    // badge_name が false なら、状態アイコンと進捗だけをバッジにし、msg の前は `: `
-    let without = without_badge_name(base());
+    // name_in_badge が false なら、状態アイコンと進捗だけをバッジにし、msg の前は `: `
+    let without = without_name_in_badge(base());
     let line_without = plain_with(&agents, 80, &without);
     assert_eq!(line_without, " [↻ 42%] claude: Running tests  [✓] codex");
     // 違いは端の文字の位置と msg の前の区切りだけなので、区切りの差の 1 だけ狭い
@@ -1098,7 +1120,7 @@ fn badge_name_puts_name_into_badge() {
 }
 
 #[test]
-fn badge_name_includes_cwd_and_follows_shortening() {
+fn name_in_badge_includes_cwd_and_follows_shortening() {
     let options = show_cwd();
     let a = with_msg(
         with_cwd(agent(1, AgentState::Working), "/repo/feature-branch"),
@@ -1132,7 +1154,7 @@ fn badge_name_includes_cwd_and_follows_shortening() {
 }
 
 #[test]
-fn badge_name_puts_truncated_name_into_badge() {
+fn name_in_badge_puts_truncated_name_into_badge() {
     let mut a = agent(1, AgentState::Working);
     a.title = Some("long-project-name".to_owned());
     let b = agent(2, AgentState::Done);
@@ -1146,13 +1168,16 @@ fn badge_name_puts_truncated_name_into_badge() {
         filled_runs(&agents, 24, &options),
         [" ↻ long-p~ ", " ✓ claude "]
     );
-    // 縮めたときも max_length で切り詰めたときも、端の文字を移すだけ
+    // 縮めたときも max_agent_width で切り詰めたときも、端の文字を移すだけ
     let long = [agents[0].clone()];
-    assert_eq!(plain_with(&long, 80, &max_length(16)), " [↻ long-projec~]");
+    assert_eq!(
+        plain_with(&long, 80, &max_agent_width(16)),
+        " [↻ long-projec~]"
+    );
 }
 
 #[test]
-fn badge_name_only_moves_badge_end_without_msg() {
+fn name_in_badge_only_moves_badge_end_without_msg() {
     // msg があると区切り（BadgeExtent::msg_separator）の幅も変わるので、msg のないエージェントで確かめる
     let mut agents = mixed_agents();
     for a in &mut agents {
@@ -1164,15 +1189,22 @@ fn badge_name_only_moves_badge_end_without_msg() {
             .filter(|&c| !matches!(c, '[' | ']' | ' '))
             .collect()
     };
-    let max_lengths = [None, Some(MIN_MAX_LENGTH), Some(DEFAULT_MAX_LENGTH)];
-    for base in option_combinations().into_iter().filter(|o| !o.badge_name) {
-        for max_length in max_lengths {
+    let max_agent_widths = [
+        None,
+        Some(MIN_MAX_AGENT_WIDTH),
+        Some(DEFAULT_MAX_AGENT_WIDTH),
+    ];
+    for base in option_combinations()
+        .into_iter()
+        .filter(|o| !o.name_in_badge)
+    {
+        for max_agent_width in max_agent_widths {
             let base = ViewOptions {
-                max_length,
+                max_agent_width,
                 ..base.clone()
             };
             let options = ViewOptions {
-                badge_name: true,
+                name_in_badge: true,
                 ..base.clone()
             };
             for cols in 0..120 {
@@ -1187,7 +1219,7 @@ fn badge_name_only_moves_badge_end_without_msg() {
 }
 
 #[test]
-fn badge_name_with_nerd_font_ends_badge_with_name() {
+fn name_in_badge_with_nerd_font_ends_badge_with_name() {
     let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
     a.app = Some("claude-code".to_owned());
     let a = [a];
@@ -1220,15 +1252,15 @@ fn badge_name_with_nerd_font_ends_badge_with_name() {
 }
 
 #[test]
-fn badge_name_is_ignored_with_emoji() {
+fn name_in_badge_is_ignored_with_emoji() {
     let agents = [
         with_msg(agent(1, AgentState::Error), "failed"),
         agent(2, AgentState::Done),
     ];
-    let emoji = icons(IconStyle::Emoji);
+    let emoji = state_icons(StateIconStyle::Emoji);
     assert_eq!(
         plain_with(&agents, 80, &emoji),
-        plain_with(&agents, 80, &without_badge_name(emoji.clone()))
+        plain_with(&agents, 80, &without_name_in_badge(emoji.clone()))
     );
     assert!(filled_runs(&agents, 80, &emoji).is_empty());
     // 強調するときは、強調したエージェントだけ全体を塗る
@@ -1239,7 +1271,7 @@ fn badge_name_is_ignored_with_emoji() {
 }
 
 #[test]
-fn badge_name_with_highlight_attention() {
+fn name_in_badge_with_highlight_attention() {
     use AgentState::*;
     let mut agents = named_agents([Idle, Blocked, Working, Done, Error]);
     for a in &mut agents {
