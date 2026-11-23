@@ -8,8 +8,16 @@ zellij-tile = "0.46.0"
 # ProgramStatusRecord / ProgramState は zellij-tile から再エクスポートされていないため直接参照する。
 # zellij-tile が依存しているものと同じバージョンにそろえること。
 zellij-utils = "0.46.0"
-# 表示幅の計算用。zellij-utils が依存しているものと同じバージョンにそろえている。
+
+[dev-dependencies]
+# アイコンなどの幅の確認用（表示幅の計算には zellij_tile::graphemes を使う）。
+# zellij-utils が依存しているものと同じバージョンにそろえている。
 unicode-width = "0.2.3"
+
+# 幅の総当たりのテストで zellij_tile::graphemes（実体は zellij-utils）を大量に呼ぶため、最適化して速くする。
+# unicode-segmentation / unicode-width を最適化しても、ほとんど速くならない。
+[profile.dev.package.zellij-utils]
+opt-level = 2
 
 [profile.release]
 opt-level = "s"

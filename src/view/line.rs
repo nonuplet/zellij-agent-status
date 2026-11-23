@@ -3,7 +3,7 @@
 //! クリックの判定は、描画した Span 列そのものから行う。範囲の一覧を別に作ると、行末の切り詰め（`clamp`）の後で
 //! 一覧も切り直す必要があり、表示とずれやすいため。
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use super::paint::paint;
 use super::span::Span;
@@ -46,7 +46,7 @@ impl Line {
     pub fn pane_at(&self, col: usize) -> Option<u32> {
         let mut end = 0;
         for span in &self.spans {
-            end += span.text.width();
+            end += display_width(&span.text);
             if col < end {
                 return span.pane_id;
             }

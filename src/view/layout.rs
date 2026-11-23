@@ -3,7 +3,7 @@
 //! 1 エージェント分の内容は [`item`](super::item)、バッジにする範囲は [`badge`](super::badge)、
 //! 幅に合わせた縮め方は [`fit`](super::fit) で決める。
 
-use unicode_width::UnicodeWidthStr;
+use zellij_tile::graphemes::display_width;
 
 use super::ViewOptions;
 use super::badge::BadgeStyle;
@@ -45,7 +45,7 @@ pub(super) fn layout<'a>(
     }
 
     let mut spans = vec![Span::new(PAD, Role::Plain)];
-    let line_overhead = PAD.width() + SEPARATOR.width() * (items.len() - 1);
+    let line_overhead = display_width(PAD) + display_width(SEPARATOR) * (items.len() - 1);
     let plans = plan(&items, cols, line_overhead, options.max_agent_width);
     for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {

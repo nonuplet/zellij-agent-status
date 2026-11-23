@@ -449,19 +449,41 @@ fn wide_characters_are_counted_by_width() {
     assert_eq!(plain(&a, 20), " [! claude] 許可し~");
 }
 
-/// 幅を総当たりで確かめるための、進捗・app のアイコン・cwd・msg・全角文字を含むエージェント
+/// 幅を総当たりで確かめるための、進捗・app のアイコン・cwd・msg・全角文字・絵文字を含むエージェント。
+/// 絵文字は、`char` ごとの幅の合計と表示幅が違うもの（❤️ は合計のほうが狭く、👨‍👩‍👧 は広い）
 fn mixed_agents() -> Vec<AgentStatus> {
     let mut agents = vec![
-        with_msg(agent(1, AgentState::Working), "テストを実行しています"),
-        with_msg(agent(2, AgentState::Blocked), "Allow Bash(cargo test)?"),
+        with_msg(
+            agent(1, AgentState::Working),
+            "テスト❤\u{fe0f}を実行しています",
+        ),
+        with_msg(
+            agent(2, AgentState::Blocked),
+            "Allow 👨\u{200d}👩\u{200d}👧 Bash(cargo test)?",
+        ),
         agent(3, AgentState::Done),
     ];
     agents[0].progress = Some(100);
     agents[0].app = Some("claude-code".to_owned());
-    agents[0].cwd = Some("/home/user/全角のディレクトリ".into());
-    agents[2].title = Some("全角のタイトル".to_owned());
+    agents[0].cwd = Some("/home/user/全角❤\u{fe0f}のディレクトリ".into());
+    agents[2].title = Some("❤\u{fe0f}全角のタイトル".to_owned());
     agents[2].cwd = Some("/repo/main".into());
     agents
+}
+
+/// 異体字セレクタ付きの絵文字を、行の端でも各部分の切り詰めでも、幅を超えずに切る
+#[test]
+fn emoji_with_variation_selector_never_exceeds_width() {
+    let hearts = "❤\u{fe0f}".repeat(8);
+    let mut name = agent(1, AgentState::Working);
+    name.tab_name = Some(hearts.clone());
+    let msg = with_msg(agent(1, AgentState::Working), &hearts);
+    for agent in [name, msg] {
+        for cols in 0..40 {
+            let text = plain(std::slice::from_ref(&agent), cols);
+            assert!(display_width(&text) <= cols, "cols={cols}: {text:?}");
+        }
+    }
 }
 
 #[test]
@@ -470,7 +492,10 @@ fn never_exceeds_width() {
     for options in option_combinations() {
         for cols in 0..120 {
             let text = plain_with(&agents, cols, &options);
-            assert!(text.width() <= cols, "{options:?} cols={cols}: {text:?}");
+            assert!(
+                display_width(&text) <= cols,
+                "{options:?} cols={cols}: {text:?}"
+            );
         }
     }
 }
@@ -489,9 +514,10 @@ fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> V
         let Some(pane_id) = span.pane_id else {
             continue;
         };
+        let span_width = display_width(&span.text);
         match widths.last_mut() {
-            Some((id, width)) if *id == pane_id => *width += span.text.width(),
-            _ => widths.push((pane_id, span.text.width())),
+            Some((id, width)) if *id == pane_id => *width += span_width,
+            _ => widths.push((pane_id, span_width)),
         }
     }
     widths.into_iter().map(|(_, width)| width).collect()
@@ -666,7 +692,7 @@ fn never_exceeds_max_agent_width() {
             for cols in 0..100 {
                 let text = plain_with(&agents, cols, &options);
                 let case = format!("{options:?} cols={cols}");
-                assert!(text.width() <= cols, "{case}");
+                assert!(display_width(&text) <= cols, "{case}");
                 for width in agent_widths(&agents, cols, &options) {
                     assert!(width <= max, "{case}: {text:?}");
                 }
@@ -1042,7 +1068,10 @@ fn highlight_attention_fills_whole_blocked_and_error_agents() {
         [" ⋯ ", " ! b: Allow Bash? ", " ↻ ", " ✓ ", " ✗ e "]
     );
     // 端の文字を移すだけなので、強調しても幅は変わらない
-    assert_eq!(line.width(), plain_with(&agents, 80, &base).width());
+    assert_eq!(
+        display_width(&line),
+        display_width(&plain_with(&agents, 80, &base))
+    );
     // 既定では強調しない
     assert_eq!(
         plain_with(&agents, 80, &base),
@@ -1116,7 +1145,7 @@ fn name_in_badge_puts_name_into_badge() {
     let line_without = plain_with(&agents, 80, &without);
     assert_eq!(line_without, " [↻ 42%] claude: Running tests  [✓] codex");
     // 違いは端の文字の位置と msg の前の区切りだけなので、区切りの差の 1 だけ狭い
-    assert_eq!(line.width() + 1, line_without.width());
+    assert_eq!(display_width(&line) + 1, display_width(&line_without));
 }
 
 #[test]
@@ -1211,7 +1240,7 @@ fn name_in_badge_only_moves_badge_end_without_msg() {
                 let with = plain_with(&agents, cols, &options);
                 let without = plain_with(&agents, cols, &base);
                 let case = format!("{options:?} cols={cols}");
-                assert_eq!(with.width(), without.width(), "{case}");
+                assert_eq!(display_width(&with), display_width(&without), "{case}");
                 assert_eq!(strip(&with), strip(&without), "{case}");
             }
         }
