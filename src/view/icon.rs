@@ -53,7 +53,8 @@ impl IconStyle {
     }
 }
 
-/// `app` ごとの Nerd Font のアイコン。対応がなければ None（アイコンを出さない）。
+/// `app` ごとのアイコン（Nerd Font の文字）。対応がなければ None（アイコンを出さない）。
+/// 付けるかどうかは `show_app_icon` で決まり、状態アイコンの種類（[`IconStyle`]）には関係しない。
 ///
 /// Nerd Font の文字は Private Use Area にあり、East Asian Width は Ambiguous
 /// （`unicode-width` の `width()` は 1、`width_cjk()` は 2）。幅は 1 桁として扱う。

@@ -51,9 +51,9 @@ pub(super) fn icons(icons: IconStyle) -> ViewOptions {
     ViewOptions { icons, ..base() }
 }
 
-/// アイコン・cwd・Nerd Font モード（バッジの端の形）・強調・アイコンの後ろの空白・バッジの中の名前・
+/// アイコン・cwd・バッジの端の形・`app` のアイコン・強調・アイコンの後ろの空白・バッジの中の名前・
 /// msg の表示モードの組み合わせ。
-/// アイコンの後ろの空白が効かない組み合わせでは、同じ設定が 2 回入る（重複は気にしない）。
+/// アイコンの後ろの空白は、Nerd Font のアイコンがある（効く）組み合わせでだけ true も入れる。
 /// msg の表示モードの `None` は、msg のないエージェントだけになるのと同じなので入れない
 pub(super) fn option_combinations() -> Vec<ViewOptions> {
     let styles = [
@@ -62,32 +62,37 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
         IconStyle::Emoji,
         IconStyle::Nerd,
     ];
-    let modes = [
-        (false, BadgeShape::Slash),
-        (true, BadgeShape::Slash),
-        (true, BadgeShape::Arrow),
-        (true, BadgeShape::Round),
+    let shapes = [
+        BadgeShape::Square,
+        BadgeShape::Slash,
+        BadgeShape::Arrow,
+        BadgeShape::Round,
     ];
     let mut combinations = vec![];
     for style in styles {
-        for show_cwd in [false, true] {
-            for (nerd_font, badge_shape) in modes {
-                for highlight_attention in [false, true] {
-                    // アイコンの後ろの空白は Nerd Font のアイコンがあるときだけ効く
-                    let uses_nerd_icon = nerd_font || style == IconStyle::Nerd;
-                    for nerd_font_icon_padding in [false, uses_nerd_icon] {
-                        for badge_name in [false, true] {
-                            for msg_mode in [MsgMode::All, MsgMode::Attention] {
-                                combinations.push(ViewOptions {
-                                    show_cwd,
-                                    nerd_font,
-                                    badge_shape,
-                                    highlight_attention,
-                                    nerd_font_icon_padding,
-                                    badge_name,
-                                    msg_mode,
-                                    ..icons(style)
-                                });
+        for show_app_icon in [false, true] {
+            let paddings = if show_app_icon || style == IconStyle::Nerd {
+                &[false, true][..]
+            } else {
+                &[false]
+            };
+            for &nerd_font_icon_padding in paddings {
+                for badge_shape in shapes {
+                    for show_cwd in [false, true] {
+                        for highlight_attention in [false, true] {
+                            for badge_name in [false, true] {
+                                for msg_mode in [MsgMode::All, MsgMode::Attention] {
+                                    combinations.push(ViewOptions {
+                                        show_cwd,
+                                        badge_shape,
+                                        show_app_icon,
+                                        highlight_attention,
+                                        nerd_font_icon_padding,
+                                        badge_name,
+                                        msg_mode,
+                                        ..icons(style)
+                                    });
+                                }
                             }
                         }
                     }

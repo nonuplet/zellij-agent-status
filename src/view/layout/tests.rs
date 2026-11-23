@@ -534,10 +534,11 @@ fn max_length_counts_icon_and_progress() {
     };
     // 絵文字はバッジの端がない分、名前に回せる幅が広い
     assert_eq!(plain_with(&[a.clone()], 80, &emoji), " ⏳ 100% my-project");
-    // Nerd Font モードでは、バッジの両端の内側の空白の 2 と、名前の前の app のアイコンと前の空白の 2 も数える
+    // 端が Nerd Font の文字のバッジの内側の空白の 2 と、名前の前の app のアイコンと前の空白の 2 も数える
     a.app = Some("claude-code".to_owned());
     let nerd = ViewOptions {
-        nerd_font: true,
+        badge_shape: BadgeShape::Slash,
+        show_app_icon: true,
         icons: IconStyle::Nerd,
         ..max_length(MIN_MAX_LENGTH)
     };
@@ -663,23 +664,24 @@ fn never_exceeds_max_length() {
     }
 }
 
+/// 状態アイコンと app のアイコンを Nerd Font の文字にし、バッジの端を `badge_shape` の形にする
 fn nerd_font(badge_shape: BadgeShape) -> ViewOptions {
     ViewOptions {
-        nerd_font: true,
         badge_shape,
+        show_app_icon: true,
         ..icons(IconStyle::Nerd)
     }
 }
 
 #[test]
-fn nerd_font_shows_app_icon() {
+fn show_app_icon_puts_app_icon_before_name() {
     let mut a = with_msg(agent(1, AgentState::Working), "Running tests");
     a.app = Some("claude-code".to_owned());
     let mut b = agent(2, AgentState::Done);
     b.app = Some("codex".to_owned());
     let agents = [a, b];
     // app のアイコンは名前の前。対応するアイコンのない app（codex）には付けない。
-    // エージェント同士の区切りは Nerd Font モードでも空白
+    // エージェント同士の区切りは、バッジの端が Nerd Font の文字でも空白
     for shape in SHAPES {
         assert_eq!(
             plain_with(&agents, 80, &nerd_font(shape)),
@@ -706,19 +708,66 @@ fn nerd_font_shows_app_icon() {
         plain_with(&with_dir, 80, &no_badge_name),
         " [ \u{f013} ] \u{ec82} claude-code (main): Running tests"
     );
-    // Nerd Font モードでなければ、app のアイコンを付けない
-    let symbol_only = ViewOptions {
-        badge_shape: BadgeShape::Arrow,
-        ..base()
+    // show_app_icon が false なら、ほかを Nerd Font の文字にしていても app のアイコンを付けない
+    let without_app_icon = ViewOptions {
+        show_app_icon: false,
+        ..nerd_font(BadgeShape::Slash)
     };
     assert_eq!(
-        plain_with(&agents, 80, &symbol_only),
-        " [↻ claude-code] Running tests  [✓ codex]"
+        plain_with(&agents, 80, &without_app_icon),
+        " [ \u{f013} claude-code ] Running tests  [ \u{f00c} codex ]"
     );
 }
 
 #[test]
-fn nerd_font_app_icon_ignores_show_app_name() {
+fn icon_style_badge_shape_and_app_icon_are_independent() {
+    let mut a = with_msg(agent(1, AgentState::Blocked), "msg");
+    a.app = Some("claude-code".to_owned());
+    let a = [a];
+    let styles = [
+        (IconStyle::Symbol, "!"),
+        (IconStyle::Alphabet, "B"),
+        (IconStyle::Nerd, "\u{f071}"),
+    ];
+    let shapes = [
+        (BadgeShape::Square, " ", " "),
+        (BadgeShape::Slash, "\u{e0ba} ", " \u{e0bc}"),
+        (BadgeShape::Arrow, "\u{e0b2} ", " \u{e0b0}"),
+        (BadgeShape::Round, "\u{e0b6} ", " \u{e0b4}"),
+    ];
+    let raw = |icons, badge_shape, show_app_icon| -> String {
+        let options = ViewOptions {
+            icons,
+            badge_shape,
+            show_app_icon,
+            ..base()
+        };
+        layout(&a, 80, &options)
+            .into_iter()
+            .map(|s| s.text)
+            .collect()
+    };
+    for (shape, left, right) in shapes {
+        for (show_app_icon, app_icon) in [(false, ""), (true, "\u{ec82} ")] {
+            for (style, icon) in styles {
+                assert_eq!(
+                    raw(style, shape, show_app_icon),
+                    format!(" {left}{icon} {app_icon}claude-code{right} msg"),
+                    "{style:?} {shape:?} {show_app_icon}"
+                );
+            }
+            // 絵文字アイコンはバッジにならないので、badge_shape は効かない
+            assert_eq!(
+                raw(IconStyle::Emoji, shape, show_app_icon),
+                format!(" ❗ {app_icon}claude-code: msg"),
+                "{shape:?} {show_app_icon}"
+            );
+        }
+    }
+}
+
+#[test]
+fn app_icon_ignores_show_app_name() {
     let mut a = agent(7, AgentState::Idle);
     a.app = Some("claude-code".to_owned());
     let options = ViewOptions {
@@ -726,17 +775,6 @@ fn nerd_font_app_icon_ignores_show_app_name() {
         ..nerd_font(BadgeShape::Slash)
     };
     assert_eq!(plain_with(&[a], 80, &options), " [ \u{f186} \u{ec82} #7 ]");
-}
-
-#[test]
-fn nerd_font_can_be_combined_with_other_icon_styles() {
-    let mut a = agent(1, AgentState::Done);
-    a.app = Some("claude-code".to_owned());
-    let options = ViewOptions {
-        icons: IconStyle::Emoji,
-        ..nerd_font(BadgeShape::Slash)
-    };
-    assert_eq!(plain_with(&[a], 80, &options), " ✅ \u{ec82} claude-code");
 }
 
 #[test]
@@ -801,12 +839,39 @@ fn nerd_font_icon_padding_adds_space_after_icons() {
         plain_with(&agents, 80, &highlighted),
         " [ \u{f071}  \u{ec82}  claude-code: Allow? ]  [ \u{f00c} 42% \u{ec82}  claude-code (main) ]"
     );
-    // Nerd Font のアイコンを使わなければ何も変わらない
-    let symbol = ViewOptions {
-        nerd_font_icon_padding: true,
-        ..base()
+    // 状態アイコンと app のアイコンのうち、Nerd Font のアイコンの後ろにだけ置く
+    let status_icon_only = ViewOptions {
+        show_app_icon: false,
+        ..padded.clone()
     };
-    assert_eq!(plain_with(&agents, 80, &symbol), plain(&agents, 80));
+    assert_eq!(
+        plain_with(&agents, 80, &status_icon_only),
+        " [ \u{f071}  claude-code ] Allow?  [ \u{f00c} 42% claude-code (main) ]"
+    );
+    let app_icon_only = ViewOptions {
+        icons: IconStyle::Symbol,
+        ..padded.clone()
+    };
+    assert_eq!(
+        plain_with(&agents, 80, &app_icon_only),
+        " [ ! \u{ec82}  claude-code ] Allow?  [ ✓ 42% \u{ec82}  claude-code (main) ]"
+    );
+    // Nerd Font のアイコンを使わなければ、バッジの端が Nerd Font の文字でも何も変わらない
+    for badge_shape in [BadgeShape::Square, BadgeShape::Slash] {
+        let options = ViewOptions {
+            badge_shape,
+            ..base()
+        };
+        let padded = ViewOptions {
+            nerd_font_icon_padding: true,
+            ..options.clone()
+        };
+        assert_eq!(
+            plain_with(&agents, 80, &padded),
+            plain_with(&agents, 80, &options),
+            "{badge_shape:?}"
+        );
+    }
 }
 
 #[test]
@@ -876,39 +941,38 @@ fn badge_ends(agents: &[AgentStatus], options: &ViewOptions) -> Vec<String> {
         .collect()
 }
 
+/// 端に Nerd Font の文字を使う形
 const SHAPES: [BadgeShape; 3] = [BadgeShape::Slash, BadgeShape::Arrow, BadgeShape::Round];
 
 #[test]
-fn badge_ends_depend_on_nerd_font_mode() {
+fn badge_ends_follow_badge_shape() {
     let a = [agent(1, AgentState::Working)];
+    let shaped = |badge_shape, icons| ViewOptions {
+        badge_shape,
+        icons,
+        ..base()
+    };
+    // 既定は空白
     assert_eq!(badge_ends(&a, &base()), [" ", " "]);
-    for shape in SHAPES {
-        let (left, right) = shape.glyphs();
-        assert_eq!(
-            badge_ends(&a, &nerd_font(shape)),
-            [left, right],
+    for style in [IconStyle::Symbol, IconStyle::Alphabet, IconStyle::Nerd] {
+        let square = shaped(BadgeShape::Square, style);
+        assert_eq!(badge_ends(&a, &square), [" ", " "], "{style:?}");
+        for shape in SHAPES {
+            let (left, right) = shape.glyphs().unwrap();
+            assert_eq!(
+                badge_ends(&a, &shaped(shape, style)),
+                [left, right],
+                "{style:?} {shape:?}"
+            );
+        }
+    }
+    // 絵文字はバッジにしない
+    for shape in [BadgeShape::Square].into_iter().chain(SHAPES) {
+        assert!(
+            badge_ends(&a, &shaped(shape, IconStyle::Emoji)).is_empty(),
             "{shape:?}"
         );
-        // Nerd Font モードでなければ、形を指定しても空白
-        let plain_mode = ViewOptions {
-            badge_shape: shape,
-            ..icons(IconStyle::Nerd)
-        };
-        assert_eq!(badge_ends(&a, &plain_mode), [" ", " "], "{shape:?}");
     }
-    // 既定の形は slash
-    assert_eq!(
-        badge_ends(
-            &a,
-            &ViewOptions {
-                nerd_font: true,
-                ..icons(IconStyle::Nerd)
-            }
-        ),
-        ["\u{e0ba}", "\u{e0bc}"]
-    );
-    // 絵文字はバッジにしない
-    assert!(badge_ends(&a, &icons(IconStyle::Emoji)).is_empty());
 }
 
 #[test]
@@ -919,7 +983,7 @@ fn badge_without_name_fills_icon_and_progress() {
     let options = without_badge_name(base());
     assert_eq!(plain_with(&a, 80, &options), " [↻ 42%] claude: Running");
     assert_eq!(filled_runs(&a, 80, &options), [" ↻ 42% "]);
-    // Nerd Font モードの端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
+    // Nerd Font の端の文字は塗らずに前景色で描くので、塗るのはその内側だけ
     for shape in SHAPES {
         assert_eq!(
             filled_runs(&a, 80, &without_badge_name(nerd_font(shape))),
@@ -975,7 +1039,7 @@ fn highlight_attention_with_nerd_font_moves_badge_ends_to_agent_end() {
             .into_iter()
             .map(|s| s.text)
             .collect();
-        let (left, right) = shape.glyphs();
+        let (left, right) = shape.glyphs().unwrap();
         assert_eq!(
             raw,
             format!(" {left} \u{f071} \u{ec82} claude-code: Allow? {right}"),
@@ -1094,7 +1158,7 @@ fn badge_name_only_moves_badge_end_without_msg() {
     for a in &mut agents {
         a.msg = None;
     }
-    // 右端と一緒に内側の空白（Nerd Font モード）も移るので、端の文字と空白を除いた中身と幅で比べる
+    // 右端と一緒に内側の空白（Nerd Font の端の文字のとき）も移るので、端の文字と空白を除いた中身と幅で比べる
     let strip = |line: &str| -> String {
         line.chars()
             .filter(|&c| !matches!(c, '[' | ']' | ' '))

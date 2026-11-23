@@ -19,16 +19,16 @@ pub(super) const MIN_MSG_WIDTH: usize = 6;
 pub(super) const MIN_CWD_WIDTH: usize = 4;
 pub(super) const MIN_NAME_WIDTH: usize = 4;
 /// [`ViewOptions::max_length`](super::ViewOptions::max_length) の下限。
-/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。Nerd Font モードでは両端の内側の空白を足して 4）、
+/// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。端が Nerd Font の文字なら内側の空白を足して 4）、
 /// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の前の `app` のアイコンと前の空白
-/// （Nerd Font モードで 2）、アイコンの後ろの空白
+/// （[`ViewOptions::show_app_icon`](super::ViewOptions::show_app_icon) で 2）、`app` のアイコンの後ろの空白
 /// （[`ViewOptions::nerd_font_icon_padding`](super::ViewOptions::nerd_font_icon_padding) で 1）を足した幅。
-/// 最も広いのは Nerd Font モードで絵文字以外のアイコン（1 + 4）を選び、アイコンの後ろに空白を置くとき。
+/// 最も広いのは、絵文字以外のアイコンで端を Nerd Font の文字にし（1 + 4）、`app` のアイコンとその後ろの空白を付けるとき。
 /// 設定ごとに下限を変えると config の読み込みが設定の順番に依存するので、最も広い場合に合わせている。
 /// Nerd Font の状態アイコンの後ろの空白は、進捗がないときだけ付けるので、進捗の最大幅を超えない。
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
-/// - アイコンと進捗だけで上限を超えることがある（例：Nerd Font モードのバッジ + ` 100%` で 10）
+/// - アイコンと進捗だけで上限を超えることがある（例：端が Nerd Font の文字のバッジ + ` 100%` で 10）
 /// - 上限に収めるために名前を省くことになり、エージェントを見分けられなくなる
 pub const MIN_MAX_LENGTH: usize = 18;
 
