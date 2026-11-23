@@ -1,7 +1,7 @@
 //! 状態バッジ：状態アイコンから名前（と `app` のアイコン・cwd）までを、状態の色で背景を塗ったバッジ
 //! （`[↻ 42% 名前 (cwd)] msg`）にする。Span の組み立ては [`Item::spans`](super::item::Item::spans) で行う。
 //!
-//! バッジ・アイコンに関わる設定（`icons` / `badge_shape` / `show_app_icon` / `badge_name` / `highlight_attention` /
+//! バッジ・アイコンに関わる設定（`state_icon_style` / `badge_shape` / `show_app_icon` / `name_in_badge` / `highlight_attention` /
 //! `nerd_font_icon_padding`）は互いに依存するので、その組み合わせは [`BadgeStyle::new`] でまとめて解決する。
 //! [`Item`](super::item::Item) は解決した結果だけを見る。
 //!
@@ -14,7 +14,7 @@
 //! Mono 版でない Nerd Font などでは、アイコンが 1 桁からはみ出して 1.5〜2 桁ほどの幅で描かれることがある
 //! （記号のアイコンでも右の余白が少ないものがある）。アイコンの後ろに文字が続けば、はみ出した分は
 //! 次の空白に重なるだけで目立たない。`app` のアイコンを名前の前に置くのも同じ理由で、バッジの末尾がアイコンにならないようにしている。
-//! [`ViewOptions::badge_name`] が false なら、状態アイコンと進捗だけをバッジにする（`[↻ 42%] 名前: msg`）。
+//! [`ViewOptions::name_in_badge`] が false なら、状態アイコンと進捗だけをバッジにする（`[↻ 42%] 名前: msg`）。
 //! 名前を省いたとき（縮める段階 4。[`fit`](super::fit) を参照）も、状態アイコンと進捗だけのバッジになる。
 //!
 //! [`ViewOptions::highlight_attention`] が true なら、`Blocked` / `Error` のエージェントは 1 つ分全体を
@@ -23,7 +23,7 @@
 //! msg がなければ幅は変わらない。msg があると、名前までバッジに入れて強調しないときだけ、区切りが 1 桁狭い。
 
 use super::ViewOptions;
-use super::icon::{IconStyle, app_icon};
+use super::icon::{StateIconStyle, app_icon};
 use super::span::{Fill, Role, Span};
 use crate::model::AgentState;
 
@@ -88,7 +88,7 @@ pub(super) enum BadgeExtent {
     None,
     /// 状態アイコンと進捗
     Head,
-    /// 名前（と `app` のアイコン・cwd）まで（[`ViewOptions::badge_name`]）
+    /// 名前（と `app` のアイコン・cwd）まで（[`ViewOptions::name_in_badge`]）
     Label,
     /// msg まで、エージェント 1 つ分全体（[`ViewOptions::highlight_attention`]）
     Whole,
@@ -120,7 +120,7 @@ impl BadgeExtent {
 /// 行全体で 1 つ作り、各エージェントの [`Item`](super::item::Item) はここから自分の見た目を決める。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct BadgeStyle {
-    icons: IconStyle,
+    state_icon_style: StateIconStyle,
     /// バッジの端の形。絵文字アイコンなら None（バッジにしない）
     shape: Option<BadgeShape>,
     /// 強調しないエージェントでバッジに入れる範囲
@@ -135,18 +135,18 @@ pub(super) struct BadgeStyle {
 
 impl BadgeStyle {
     pub(super) fn new(options: &ViewOptions) -> Self {
-        // badge_shape と badge_name は、バッジにしない（絵文字アイコン）ときは効かない
-        let shape = match options.icons {
-            IconStyle::Emoji => None,
+        // badge_shape と name_in_badge は、バッジにしない（絵文字アイコン）ときは効かない
+        let shape = match options.state_icon_style {
+            StateIconStyle::Emoji => None,
             _ => Some(options.badge_shape),
         };
         let extent = match shape {
             None => BadgeExtent::None,
-            Some(_) if options.badge_name => BadgeExtent::Label,
+            Some(_) if options.name_in_badge => BadgeExtent::Label,
             Some(_) => BadgeExtent::Head,
         };
         BadgeStyle {
-            icons: options.icons,
+            state_icon_style: options.state_icon_style,
             shape,
             extent,
             highlight: options.highlight_attention,
@@ -156,7 +156,7 @@ impl BadgeStyle {
     }
 
     pub(super) fn icon(&self, state: AgentState) -> &'static str {
-        self.icons.icon(state)
+        self.state_icon_style.icon(state)
     }
 
     pub(super) fn shape(&self) -> Option<BadgeShape> {
@@ -177,7 +177,7 @@ impl BadgeStyle {
     /// 進捗があればその前の空白が右隣になるので、置かない。
     /// 強調して名前が続くときも置く（幅を状態によらず同じにするため。名前との間は空白 2 つになる）。
     pub(super) fn pads_state_icon(&self, has_progress: bool) -> bool {
-        self.icon_padding && self.icons == IconStyle::Nerd && !has_progress
+        self.icon_padding && self.state_icon_style == StateIconStyle::NerdFont && !has_progress
     }
 
     /// 名前の前に付ける `app` のアイコン（[`ViewOptions::show_app_icon`] が true で、対応するアイコンがあるときだけ）

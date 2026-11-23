@@ -2,7 +2,7 @@
 
 use unicode_width::UnicodeWidthStr;
 
-use super::{BadgeShape, IconStyle, MsgMode, ViewOptions};
+use super::{BadgeShape, MsgMode, StateIconStyle, ViewOptions};
 use crate::model::{AgentState, AgentStatus};
 
 pub(super) fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
@@ -47,8 +47,11 @@ pub(super) fn base() -> ViewOptions {
     }
 }
 
-pub(super) fn icons(icons: IconStyle) -> ViewOptions {
-    ViewOptions { icons, ..base() }
+pub(super) fn state_icons(state_icon_style: StateIconStyle) -> ViewOptions {
+    ViewOptions {
+        state_icon_style,
+        ..base()
+    }
 }
 
 /// アイコン・cwd・バッジの端の形・`app` のアイコン・強調・アイコンの後ろの空白・バッジの中の名前・
@@ -57,10 +60,10 @@ pub(super) fn icons(icons: IconStyle) -> ViewOptions {
 /// msg の表示モードの `None` は、msg のないエージェントだけになるのと同じなので入れない
 pub(super) fn option_combinations() -> Vec<ViewOptions> {
     let styles = [
-        IconStyle::Symbol,
-        IconStyle::Alphabet,
-        IconStyle::Emoji,
-        IconStyle::Nerd,
+        StateIconStyle::Symbol,
+        StateIconStyle::Alphabet,
+        StateIconStyle::Emoji,
+        StateIconStyle::NerdFont,
     ];
     let shapes = [
         BadgeShape::Square,
@@ -71,7 +74,7 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
     let mut combinations = vec![];
     for style in styles {
         for show_app_icon in [false, true] {
-            let paddings = if show_app_icon || style == IconStyle::Nerd {
+            let paddings = if show_app_icon || style == StateIconStyle::NerdFont {
                 &[false, true][..]
             } else {
                 &[false]
@@ -80,7 +83,7 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
                 for badge_shape in shapes {
                     for show_cwd in [false, true] {
                         for highlight_attention in [false, true] {
-                            for badge_name in [false, true] {
+                            for name_in_badge in [false, true] {
                                 for msg_mode in [MsgMode::All, MsgMode::Attention] {
                                     combinations.push(ViewOptions {
                                         show_cwd,
@@ -88,9 +91,9 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
                                         show_app_icon,
                                         highlight_attention,
                                         nerd_font_icon_padding,
-                                        badge_name,
+                                        name_in_badge,
                                         msg_mode,
-                                        ..icons(style)
+                                        ..state_icons(style)
                                     });
                                 }
                             }

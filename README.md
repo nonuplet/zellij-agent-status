@@ -36,18 +36,18 @@ keybinds {
 ```kdl
 pane size=1 borderless=true {
     plugin location="file:/path/to/zellij-agent-status.wasm" {
-        icon_style "alphabet"
-        apps "claude-code"
-        show_app_name "false"
-        show_tab_name "false"
+        state_icon_style "alphabet"
+        app_filter "claude-code"
+        use_app_name "false"
+        use_tab_name "false"
         blocked_first "true"
-        max_length 40
+        max_agent_width 40
         show_cwd "true"
         badge_shape "round"
         show_app_icon "true"
         nerd_font_icon_padding "true"
         highlight_attention "true"
-        badge_name "false"
+        name_in_badge "false"
         msg_mode "all"
     }
 }
@@ -55,28 +55,28 @@ pane size=1 borderless=true {
 
 | キー | 既定値 | 内容 |
 |---|---|---|
-| `icon_style` | `symbol`（`nerd_font` が `true` なら `nerd`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd`）のどれにするか。絵文字は状態の色で塗られず、バッジにもならない |
-| `apps` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
-| `show_app_name` | `true` | `app` を名前の候補にするか（`true` / `false`）。`apps` の絞り込みには影響しない |
-| `show_tab_name` | `true` | タブ名を名前の候補にするか（`true` / `false`）。タブバーなどでタブ名がすでに見えているときや、1 タブに 1 エージェントしか置かないときは `false` にすると重複しない |
+| `state_icon_style` | `symbol`（`nerd_font` が `true` なら `nerd_font`） | アイコンを記号（`symbol`）、アルファベット 1 文字（`alphabet`）、絵文字（`emoji`）、Nerd Font（`nerd_font`）のどれにするか。絵文字は状態の色で塗られず、バッジにもならない |
+| `app_filter` | （空） | 表示する `app` の一覧。カンマか空白で区切る。空なら絞り込まない。指定したときは `app` のないレコードを表示しない |
+| `use_app_name` | `true` | `app` を名前の候補にするか（`true` / `false`）。`app_filter` の絞り込みには影響しない |
+| `use_tab_name` | `true` | タブ名を名前の候補にするか（`true` / `false`）。タブバーなどでタブ名がすでに見えているときや、1 タブに 1 エージェントしか置かないときは `false` にすると重複しない |
 | `blocked_first` | `false` | 操作待ち（`Blocked`）のエージェントを先頭に並べるか（`true` / `false`）。`false` なら常にタブ・ペインの順。`Blocked` 同士はタブ・ペインの順で、`Blocked` でなくなると元の位置に戻る |
-| `max_length` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。18 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
-| `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_length` を超えるときも）は msg の次に省く |
-| `nerd_font` | `false` | Nerd Font を使う既定値に切り替えるか（`true` / `false`）。`icon_style` / `badge_shape` / `show_app_icon` の既定値だけが変わり、それぞれ指定すればそちらが優先される |
+| `max_agent_width` | `50` | 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。18 以上の整数。超える分は msg から切り詰める。`0` なら上限なし |
+| `show_cwd` | `false` | 名前の後ろにカレントディレクトリの末尾のディレクトリ名を `名前 (dir)` の形で表示するか（`true` / `false`）。幅が足りないとき（`max_agent_width` を超えるときも）は msg の次に省く |
+| `nerd_font` | `false` | Nerd Font を使う既定値に切り替えるか（`true` / `false`）。`state_icon_style` / `badge_shape` / `show_app_icon` の既定値だけが変わり、それぞれ指定すればそちらが優先される |
 | `badge_shape` | `square`（`nerd_font` が `true` なら `slash`） | 状態バッジの端の形。四角（`square`、空白を塗るだけ）、斜め（`slash`）、矢印（`arrow`）、半円（`round`）のどれか。絵文字アイコンはバッジにならないので効かない |
-| `show_app_icon` | `false`（`nerd_font` が `true` なら `true`） | 名前の前にエージェント（`app`）のアイコンを付けるか（`true` / `false`）。アイコンがあるのは今は Claude Code のみ。`show_app_name` や `icon_style` には関係なく付ける |
-| `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う（`badge_name` が `true` なら、たいていは要らない） |
+| `show_app_icon` | `false`（`nerd_font` が `true` なら `true`） | 名前の前にエージェント（`app`）のアイコンを付けるか（`true` / `false`）。アイコンがあるのは今は Claude Code のみ。`use_app_name` や `state_icon_style` には関係なく付ける |
+| `nerd_font_icon_padding` | `false` | Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか（`true` / `false`）。アイコンの右が切れたり隣と重なったりするときに使う（`name_in_badge` が `true` なら、たいていは要らない） |
 | `highlight_attention` | `false` | 注意が必要な状態（`Blocked` / `Error`）のエージェントを、1 つ分全体を状態の色の背景で表示して強調するか（`true` / `false`）。絵文字アイコンのときも強調する |
-| `badge_name` | `true` | 状態バッジの中に、名前（と `show_app_icon` の `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
+| `name_in_badge` | `true` | 状態バッジの中に、名前（と `show_app_icon` の `app` のアイコン、`show_cwd` の cwd）も入れるか（`true` / `false`）。`false` なら状態アイコンと進捗だけをバッジにする。`true` ならバッジの端が名前と msg の境目になるので、間の `: ` を空白 1 つにする（強調したエージェントは msg までバッジなので `: ` のまま）。絵文字アイコンはバッジにならないので効かない |
 | `msg_mode` | `attention` | msg を表示するエージェント。表示しない（`none`）、注意が必要な状態（`Blocked` / `Error`、`highlight_attention` と同じ）のエージェントだけ（`attention`）、すべて（`all`）のどれか。msg を表示しないエージェントの分の幅は、ほかの部分に回す |
 
-エージェントの名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`show_tab_name` / `show_app_name` が `false` ならタブ名 / `app` を飛ばします。Claude Code は `title` を送らないので、両方 `false` にすると名前は `#<pane_id>` になります。
+エージェントの名前は `title` → タブ名 → `app` → `#<pane_id>` の順で決まり、`use_tab_name` / `use_app_name` が `false` ならタブ名 / `app` を飛ばします。Claude Code は `title` を送らないので、両方 `false` にすると名前は `#<pane_id>` になります。
 
 状態アイコンから名前（と `app` のアイコン・cwd）までは、状態の色を背景にしたバッジとして表示します（端は `badge_shape` の形にします）。名前を省くほど幅が足りないときは、状態アイコンと進捗だけのバッジになります。状態の色はテーマの前景色向けの色を使っているので、背景にしたときの見え方はテーマ次第です。
 
-`icon_style "nerd"`、`square` 以外の `badge_shape`（絵文字アイコンのときを除く）、`show_app_icon "true"` のどれかを使うとき（`nerd_font "true"` では既定でどれも使います）は、端末のフォントが [Nerd Fonts](https://www.nerdfonts.com/) である必要があります。Nerd Font の文字は 1 桁として幅を計算します。これらの文字は East Asian Width が Ambiguous なので、端末で Ambiguous な文字を 2 桁で表示する設定にしていると、表示がずれたり行からはみ出したりします（クリックしたときにフォーカスするエージェントもずれます）。
+`state_icon_style "nerd_font"`、`square` 以外の `badge_shape`（絵文字アイコンのときを除く）、`show_app_icon "true"` のどれかを使うとき（`nerd_font "true"` では既定でどれも使います）は、端末のフォントが [Nerd Fonts](https://www.nerdfonts.com/) である必要があります。Nerd Font の文字は 1 桁として幅を計算します。これらの文字は East Asian Width が Ambiguous なので、端末で Ambiguous な文字を 2 桁で表示する設定にしていると、表示がずれたり行からはみ出したりします（クリックしたときにフォーカスするエージェントもずれます）。
 
-Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと端末の組み合わせで変わります（Mono 版のフォントでもはみ出すことがあり、1 桁に収まるフォントでは端末によってアイコンが潰れて見分けられないことがあります）。名前までバッジに入れる（`badge_name` が既定で `true`、`app` のアイコンを名前の前に置く）のは、はみ出したアイコンがバッジの端で切れたり重なったりしないよう、アイコンの後ろに必ず文字が続くようにするためです。それでもアイコンの右が切れたり隣の文字と重なったりするとき（`badge_name "false"` のときや、幅が足りず状態アイコンだけになったときなど）は、`nerd_font_icon_padding "true"` を指定してください。
+Nerd Font のアイコンが 1 桁に収まるかどうかは、フォントと端末の組み合わせで変わります（Mono 版のフォントでもはみ出すことがあり、1 桁に収まるフォントでは端末によってアイコンが潰れて見分けられないことがあります）。名前までバッジに入れる（`name_in_badge` が既定で `true`、`app` のアイコンを名前の前に置く）のは、はみ出したアイコンがバッジの端で切れたり重なったりしないよう、アイコンの後ろに必ず文字が続くようにするためです。それでもアイコンの右が切れたり隣の文字と重なったりするとき（`name_in_badge "false"` のときや、幅が足りず状態アイコンだけになったときなど）は、`nerd_font_icon_padding "true"` を指定してください。
 
 `show_cwd` で表示されるのは、ペインのルートプロセス（通常はシェル）のカレントディレクトリです。エージェントが中で別のディレクトリ（worktree など）に移っても追従せず、SSH 先やサンドボックス内で動くエージェントでは手元のシェルのディレクトリが表示されます。worktree ごとに見分けたいときは、そのディレクトリに `cd` してからエージェントを起動してください。
 

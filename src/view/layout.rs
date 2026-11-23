@@ -46,7 +46,7 @@ pub(super) fn layout<'a>(
 
     let mut spans = vec![Span::new(PAD, Role::Plain)];
     let line_overhead = PAD.width() + SEPARATOR.width() * (items.len() - 1);
-    let plans = plan(&items, cols, line_overhead, options.max_length);
+    let plans = plan(&items, cols, line_overhead, options.max_agent_width);
     for (i, (item, widths)) in items.iter().zip(plans).enumerate() {
         if i > 0 {
             spans.push(Span::new(SEPARATOR, Role::Plain));

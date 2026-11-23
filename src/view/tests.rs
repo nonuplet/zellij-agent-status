@@ -65,7 +65,7 @@ fn paint_colors_spans_and_fills_width() {
 
     // 名前をバッジに入れなければ、アイコンの直後が右端の空白で、名前は前景色のまま
     let without = ViewOptions {
-        badge_name: false,
+        name_in_badge: false,
         ..Default::default()
     };
     let line = painted(&a, 20, &without);
@@ -96,7 +96,7 @@ fn paint_colors_spans_and_fills_width() {
         &[a],
         20,
         &ViewOptions {
-            badge_name: false,
+            name_in_badge: false,
             ..nerd.clone()
         },
     );
@@ -132,7 +132,7 @@ fn paint_inverts_highlighted_agent_and_skips_emoji_badge() {
 
     // 絵文字アイコンはバッジにしない（今までどおり前景色だけ）
     let emoji = ViewOptions {
-        icons: IconStyle::Emoji,
+        state_icon_style: StateIconStyle::Emoji,
         ..Default::default()
     };
     let line = painted(&a, 30, &emoji);
@@ -226,7 +226,7 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
 
     // 名前をバッジに入れないので、名前は行の色で描かれる
     let options = ViewOptions {
-        badge_name: false,
+        name_in_badge: false,
         ..Default::default()
     };
     let line = render_line(&a, 40, &options);

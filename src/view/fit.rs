@@ -9,7 +9,7 @@
 //! 5. それでも収まらなければ、行の末尾を切る（[`clamp`](super::text::clamp)。末尾の
 //!    [`ELLIPSIS`](super::text::ELLIPSIS) は切れた部分と同じ背景で塗る）
 //!
-//! [`ViewOptions::max_length`](super::ViewOptions::max_length) を指定しているときは、まず 1 エージェント分
+//! [`ViewOptions::max_agent_width`](super::ViewOptions::max_agent_width) を指定しているときは、まず 1 エージェント分
 //! （アイコン・進捗を含む）ずつ同じ手順でその幅に収め、そのうえで行の幅に収める（[`plan`]）。
 
 use super::item::{Item, Widths};
@@ -18,7 +18,7 @@ use super::item::{Item, Widths};
 pub(super) const MIN_MSG_WIDTH: usize = 6;
 pub(super) const MIN_CWD_WIDTH: usize = 4;
 pub(super) const MIN_NAME_WIDTH: usize = 4;
-/// [`ViewOptions::max_length`](super::ViewOptions::max_length) の下限。
+/// [`ViewOptions::max_agent_width`](super::ViewOptions::max_agent_width) の下限。
 /// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。端が Nerd Font の文字なら内側の空白を足して 4）、
 /// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の前の `app` のアイコンと前の空白
 /// （[`ViewOptions::show_app_icon`](super::ViewOptions::show_app_icon) で 2）、`app` のアイコンの後ろの空白
@@ -30,7 +30,7 @@ pub(super) const MIN_NAME_WIDTH: usize = 4;
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
 /// - アイコンと進捗だけで上限を超えることがある（例：端が Nerd Font の文字のバッジ + ` 100%` で 10）
 /// - 上限に収めるために名前を省くことになり、エージェントを見分けられなくなる
-pub const MIN_MAX_LENGTH: usize = 18;
+pub const MIN_MAX_AGENT_WIDTH: usize = 18;
 
 /// 各エージェントの各部分の幅を決める（縮める順はモジュールの説明を参照）。
 /// `line_overhead` は行頭の余白とエージェント同士の区切りの幅の合計。
@@ -38,12 +38,16 @@ pub(super) fn plan(
     items: &[Item],
     cols: usize,
     line_overhead: usize,
-    max_length: Option<usize>,
+    max_agent_width: Option<usize>,
 ) -> Vec<Widths> {
     let caps: Vec<Widths> = items
         .iter()
-        .map(|item| match max_length {
-            Some(max_length) => shrink(std::slice::from_ref(item), &[item.widths()], max_length)[0],
+        .map(|item| match max_agent_width {
+            Some(max_agent_width) => shrink(
+                std::slice::from_ref(item),
+                &[item.widths()],
+                max_agent_width,
+            )[0],
             None => item.widths(),
         })
         .collect();

@@ -1,7 +1,7 @@
 //! 表示の設定。
 
 use super::badge::BadgeShape;
-use super::icon::IconStyle;
+use super::icon::StateIconStyle;
 use crate::model::{AgentState, AgentStatus};
 
 /// 表示の設定。`load` の configuration から作る（`src/config.rs`）。
@@ -9,30 +9,30 @@ use crate::model::{AgentState, AgentStatus};
 /// バッジ・アイコンに関わる設定は互いに依存するので、view では直接読まず、
 /// [`BadgeStyle`](super::badge::BadgeStyle) で組み合わせを解決してから使う。
 ///
-/// 設定の `nerd_font` は、[`ViewOptions::icons`] / [`ViewOptions::badge_shape`] / [`ViewOptions::show_app_icon`] の
+/// 設定の `nerd_font` は、[`ViewOptions::state_icon_style`] / [`ViewOptions::badge_shape`] / [`ViewOptions::show_app_icon`] の
 /// 既定値を切り替えるだけなので、ここには持たない（切り替えは config で済ませる）。
 /// [`ViewOptions::default`] は `nerd_font` が false のときの既定値。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewOptions {
     /// 状態アイコンの種類
-    pub icons: IconStyle,
+    pub state_icon_style: StateIconStyle,
     /// 表示する `app`。None なら絞り込まない
-    pub apps: Option<Vec<String>>,
+    pub app_filter: Option<Vec<String>>,
     /// `app` を名前の候補にするか（名前の決まり方は `src/view/item.rs` の `Item::new` を参照）。
     /// 絞り込み（[`ViewOptions::shows`]）には影響しない。
-    pub show_app_name: bool,
+    pub use_app_name: bool,
     /// タブ名を名前の候補にするか。並び順と絞り込みには影響しない。
-    pub show_tab_name: bool,
+    pub use_tab_name: bool,
     /// `Blocked` のエージェントを先頭に並べるか（[`layout()`](super::layout::layout) の並べ替え）
     pub blocked_first: bool,
     /// 1 エージェント分（アイコン・進捗を含む）の表示幅の上限。None なら上限なし。
-    /// [`MIN_MAX_LENGTH`](super::MIN_MAX_LENGTH) 以上であること（config で検証する）。
-    pub max_length: Option<usize>,
+    /// [`MIN_MAX_AGENT_WIDTH`](super::MIN_MAX_AGENT_WIDTH) 以上であること（config で検証する）。
+    pub max_agent_width: Option<usize>,
     /// 名前の後ろにカレントディレクトリ（末尾のディレクトリ名）を表示するか
     pub show_cwd: bool,
     /// バッジの端の形。絵文字アイコン（バッジにしない）では使わない
     pub badge_shape: BadgeShape,
-    /// 名前の前に `app` のアイコンを付けるか。名前の候補（[`ViewOptions::show_app_name`]）とは独立
+    /// 名前の前に `app` のアイコンを付けるか。名前の候補（[`ViewOptions::use_app_name`]）とは独立
     pub show_app_icon: bool,
     /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
     /// グリフが 1 桁からはみ出すかどうかはプログラムからは判別できないため、設定にしている。
@@ -41,7 +41,7 @@ pub struct ViewOptions {
     pub highlight_attention: bool,
     /// 状態バッジの中に、名前（と `app` のアイコン・cwd）も入れるか。絵文字アイコン（バッジにしない）では使わない。
     /// 既定で入れる理由は `src/view/badge.rs` を参照
-    pub badge_name: bool,
+    pub name_in_badge: bool,
     /// どのエージェントで msg を表示するか
     pub msg_mode: MsgMode,
 }
@@ -71,25 +71,25 @@ impl MsgMode {
     }
 }
 
-/// [`ViewOptions::max_length`] の既定値
-pub const DEFAULT_MAX_LENGTH: usize = 50;
+/// [`ViewOptions::max_agent_width`] の既定値
+pub const DEFAULT_MAX_AGENT_WIDTH: usize = 50;
 
-// show_app_name などの既定値を指定するため、derive せずに書く
+// use_app_name などの既定値を指定するため、derive せずに書く
 impl Default for ViewOptions {
     fn default() -> Self {
         ViewOptions {
-            icons: IconStyle::default(),
-            apps: None,
-            show_app_name: true,
-            show_tab_name: true,
+            state_icon_style: StateIconStyle::default(),
+            app_filter: None,
+            use_app_name: true,
+            use_tab_name: true,
             blocked_first: false,
-            max_length: Some(DEFAULT_MAX_LENGTH),
+            max_agent_width: Some(DEFAULT_MAX_AGENT_WIDTH),
             show_cwd: false,
             badge_shape: BadgeShape::default(),
             show_app_icon: false,
             nerd_font_icon_padding: false,
             highlight_attention: false,
-            badge_name: true,
+            name_in_badge: true,
             msg_mode: MsgMode::default(),
         }
     }
@@ -102,9 +102,9 @@ impl ViewOptions {
         self.accepts_app(agent.app.as_deref())
     }
 
-    /// `app` が絞り込みの条件に合うか。`apps` を指定しているときは、`app` のないレコードは表示しない。
+    /// `app` が絞り込みの条件に合うか。`app_filter` を指定しているときは、`app` のないレコードは表示しない。
     fn accepts_app(&self, app: Option<&str>) -> bool {
-        match (&self.apps, app) {
+        match (&self.app_filter, app) {
             (None, _) => true,
             (Some(apps), Some(app)) => apps.iter().any(|a| a == app),
             (Some(_), None) => false,
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn accepts_app_with_filter() {
         let options = ViewOptions {
-            apps: Some(vec!["claude".to_owned()]),
+            app_filter: Some(vec!["claude".to_owned()]),
             ..Default::default()
         };
         assert!(options.accepts_app(Some("claude")));
