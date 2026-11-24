@@ -173,8 +173,8 @@ impl State {
         };
         match KeyAction::from_key(key) {
             None => false,
-            Some(action @ (KeyAction::Prev | KeyAction::Next)) => {
-                let pane_id = select::step(&self.line.pane_ids(), selection.pane_id, action);
+            Some(KeyAction::Move(step)) => {
+                let pane_id = select::step(&self.line.pane_ids(), selection.pane_id, step);
                 let changed = pane_id != selection.pane_id;
                 selection.pane_id = pane_id;
                 changed

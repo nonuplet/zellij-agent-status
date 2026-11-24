@@ -23,14 +23,21 @@ pub const PIPE_NAME: &str = "zellij-agent-status::select";
 /// 選択モード中のキーの意味
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
-    /// 左（前）のエージェントを選ぶ
-    Prev,
-    /// 右（次）のエージェントを選ぶ
-    Next,
+    /// 選択を動かす
+    Move(Step),
     /// 選んだエージェントのペインにフォーカスし、選択モードを抜ける
     Confirm,
     /// 何もせずに選択モードを抜ける
     Cancel,
+}
+
+/// 選択を動かす向き。Zellij の `Direction`（上下左右）とは別のもの
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// 左（前）のエージェントを選ぶ
+    Prev,
+    /// 右（次）のエージェントを選ぶ
+    Next,
 }
 
 impl KeyAction {
@@ -38,9 +45,9 @@ impl KeyAction {
     pub fn from_key(key: &KeyWithModifier) -> Option<Self> {
         let plain = |bare| key.is_key_without_modifier(bare);
         if plain(BareKey::Left) || plain(BareKey::Char('h')) {
-            Some(KeyAction::Prev)
+            Some(KeyAction::Move(Step::Prev))
         } else if plain(BareKey::Right) || plain(BareKey::Char('l')) {
-            Some(KeyAction::Next)
+            Some(KeyAction::Move(Step::Next))
         } else if plain(BareKey::Enter) {
             Some(KeyAction::Confirm)
         } else if plain(BareKey::Esc) || key.is_key_with_ctrl_modifier(BareKey::Char('c')) {
@@ -72,15 +79,14 @@ pub fn initial(
 
 /// `current` から左右に 1 つ動かす。端まで来たら反対側に戻る。
 /// `current` が表示されていなければ、そのまま返す（呼び出し側で選び直す）。
-pub fn step(order: &[u32], current: u32, action: KeyAction) -> u32 {
+pub fn step(order: &[u32], current: u32, step: Step) -> u32 {
     let Some(index) = order.iter().position(|&id| id == current) else {
         return current;
     };
     let len = order.len();
-    let index = match action {
-        KeyAction::Prev => (index + len - 1) % len,
-        KeyAction::Next => (index + 1) % len,
-        KeyAction::Confirm | KeyAction::Cancel => index,
+    let index = match step {
+        Step::Prev => (index + len - 1) % len,
+        Step::Next => (index + 1) % len,
     };
     order[index]
 }
@@ -138,10 +144,10 @@ mod tests {
 
     #[test]
     fn keys() {
-        assert_eq!(action("Left"), Some(KeyAction::Prev));
-        assert_eq!(action("h"), Some(KeyAction::Prev));
-        assert_eq!(action("Right"), Some(KeyAction::Next));
-        assert_eq!(action("l"), Some(KeyAction::Next));
+        assert_eq!(action("Left"), Some(KeyAction::Move(Step::Prev)));
+        assert_eq!(action("h"), Some(KeyAction::Move(Step::Prev)));
+        assert_eq!(action("Right"), Some(KeyAction::Move(Step::Next)));
+        assert_eq!(action("l"), Some(KeyAction::Move(Step::Next)));
         assert_eq!(action("Enter"), Some(KeyAction::Confirm));
         assert_eq!(action("Esc"), Some(KeyAction::Cancel));
         assert_eq!(action("Ctrl c"), Some(KeyAction::Cancel));
@@ -169,13 +175,13 @@ mod tests {
     #[test]
     fn step_wraps_around() {
         let order = [3, 1, 4];
-        assert_eq!(step(&order, 3, KeyAction::Next), 1);
-        assert_eq!(step(&order, 4, KeyAction::Next), 3);
-        assert_eq!(step(&order, 3, KeyAction::Prev), 4);
-        assert_eq!(step(&order, 1, KeyAction::Prev), 3);
-        assert_eq!(step(&[5], 5, KeyAction::Next), 5);
-        assert_eq!(step(&[5], 5, KeyAction::Prev), 5);
+        assert_eq!(step(&order, 3, Step::Next), 1);
+        assert_eq!(step(&order, 4, Step::Next), 3);
+        assert_eq!(step(&order, 3, Step::Prev), 4);
+        assert_eq!(step(&order, 1, Step::Prev), 3);
+        assert_eq!(step(&[5], 5, Step::Next), 5);
+        assert_eq!(step(&[5], 5, Step::Prev), 5);
         // 表示されていないエージェントはそのまま
-        assert_eq!(step(&order, 9, KeyAction::Next), 9);
+        assert_eq!(step(&order, 9, Step::Next), 9);
     }
 }
