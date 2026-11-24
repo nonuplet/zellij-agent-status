@@ -105,3 +105,30 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
     }
     combinations
 }
+
+/// `options` と各部分の幅が同じになる設定の代表。文字だけが違う設定と、効かない設定をそろえる。
+/// 幅が本当に同じことは、layout の `width_representative_has_same_widths` で確かめる
+pub(super) fn width_representative(options: &ViewOptions) -> ViewOptions {
+    let mut representative = options.clone();
+    if options.state_icon_style == StateIconStyle::Alphabet {
+        representative.state_icon_style = StateIconStyle::Symbol;
+    }
+    if matches!(options.badge_shape, BadgeShape::Arrow | BadgeShape::Round) {
+        representative.badge_shape = BadgeShape::Slash;
+    }
+    // 絵文字アイコンはバッジにしないので、badge_shape と name_in_badge は効かない
+    if options.state_icon_style == StateIconStyle::Emoji {
+        representative.badge_shape = BadgeShape::Square;
+        representative.name_in_badge = false;
+    }
+    representative
+}
+
+/// [`option_combinations`] のうち、幅が同じ組み合わせを代表だけにしたもの。
+/// 行の幅などと掛け合わせる総当たりのテストで、時間がかかりすぎないように使う
+pub(super) fn width_combinations() -> Vec<ViewOptions> {
+    option_combinations()
+        .into_iter()
+        .filter(|options| width_representative(options) == *options)
+        .collect()
+}

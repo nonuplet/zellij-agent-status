@@ -1,10 +1,11 @@
 //! 1 エージェント分の表示内容：何を表示するかを決め、Span 列を組み立てる。
 //!
-//! 1 エージェント分は `アイコン 進捗 名前 (cwd): msg` の形（進捗・cwd・msg はあるときだけ）。
+//! 1 エージェント分は `アイコン 進捗 名前 (cwd) msg` の形（進捗・cwd・msg はあるときだけ）。
+//! msg の前の区切りは、バッジにする範囲によって空白 1 つか `: ` になる（[`BadgeExtent::msg_separator`]）。
 //! [`ViewOptions::show_app_icon`] が true なら、名前の前に `app` のアイコンを付けて `<app> 名前 (cwd)` の形にする（対応するアイコンがあるときだけ）。
 //! `app` のアイコンは名前と一体で扱い、名前を省くときは一緒に省く。
-//! [`ViewOptions::nerd_font_icon_padding`] が true なら、Nerd Font のアイコン（状態アイコンと `app` のアイコン）の
-//! 右隣に必ず空白を置く（`[<icon> ] <app>  名前: msg`。[`app_icon`](super::icon::app_icon) を参照）。
+//! [`ViewOptions::nerd_font_icon_padding`] が true なら、Nerd Font のアイコンの右隣に必ず空白を置く
+//! （`[<icon>  <app>  名前] msg`。理由は [`app_icon`](super::icon::app_icon) を参照）。
 //! msg は [`ViewOptions::msg_mode`] で表示するエージェントにだけ持たせる。持たせないエージェントは
 //! msg がないのと同じに扱うので、空いた幅は cwd や名前に回る。
 //!
@@ -87,7 +88,7 @@ impl Item {
             head.push(Span::new(" ", state));
         }
 
-        // app のアイコンは名前の前に置く（右隣に必ず名前の前の空白が来る。src/view/badge.rs の説明を参照）
+        // app のアイコンは名前の前に置く（理由は src/view/badge.rs を参照）
         let mut name_prefix = vec![];
         if let Some(icon) = style.app_icon(agent.app.as_deref()) {
             name_prefix.push(Span::new(" ", Role::Plain));
@@ -155,9 +156,8 @@ impl Item {
 
     /// `app` のアイコン・cwd・msg は名前を表示するときだけ表示する。
     ///
-    /// 1 エージェント分を `アイコン 進捗` / ` <app> 名前 (cwd)` / `: msg` の 3 つの部分に分け、
-    /// 先頭から [`Item::extent`] の部分までをバッジに入れる（塗る）。バッジの右端（と内側の空白）は、
-    /// バッジに入れた部分の直後に置く。
+    /// 3 つの部分（[`BadgeExtent`] を参照）に分け、先頭から [`Item::extent`] の部分までをバッジに入れる（塗る）。
+    /// バッジの右端（と内側の空白）は、バッジに入れた部分の直後に置く。
     /// 名前を省いたときは名前の部分が空になるので、右端はアイコンと進捗の直後に来る。
     ///
     /// どの Span にもこのエージェントのペインを持たせ、1 エージェント分のどこをクリックしてもフォーカスできるようにする。

@@ -5,7 +5,8 @@ use crate::view::badge::BadgeShape;
 use crate::view::icon::{StateIconStyle, app_icon};
 use crate::view::span::Fill;
 use crate::view::test_support::{
-    agent, base, option_combinations, state_icons, with_cwd, with_msg,
+    agent, base, option_combinations, state_icons, width_combinations, width_representative,
+    with_cwd, with_msg,
 };
 use crate::view::text::ELLIPSIS;
 use crate::view::{DEFAULT_MAX_AGENT_WIDTH, MIN_MAX_AGENT_WIDTH, MsgMode};
@@ -14,18 +15,22 @@ fn plain(agents: &[AgentStatus], cols: usize) -> String {
     plain_with(agents, cols, &base())
 }
 
+fn plain_with(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> String {
+    plain_text(&layout(agents, cols, options))
+}
+
 /// 行の文字列。読みやすいように、バッジの端の文字は左端を `[`、右端を `]` にする
 /// （端の文字はどれも幅 1 なので、幅は変わらない）。実際の端の文字は [`badge_ends`] で確かめる。
-fn plain_with(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> String {
+fn plain_text(spans: &[Span]) -> String {
     let mut open = false;
-    layout(agents, cols, options)
-        .into_iter()
+    spans
+        .iter()
         .map(|s| match s.role {
             Role::BadgeEnd(_) => {
                 open = !open;
-                if open { "[" } else { "]" }.to_owned()
+                if open { "[" } else { "]" }
             }
-            _ => s.text,
+            _ => &s.text,
         })
         .collect()
 }
@@ -486,10 +491,33 @@ fn emoji_with_variation_selector_never_exceeds_width() {
     }
 }
 
+/// [`width_combinations`] で代表だけにまとめてよいこと：代表と、どの Span の幅も種類も同じになる
+#[test]
+fn width_representative_has_same_widths() {
+    let agents = mixed_agents();
+    let widths = |cols, options: &ViewOptions| -> Vec<_> {
+        layout(&agents, cols, options)
+            .into_iter()
+            .map(|s| (display_width(&s.text), s.role, s.fill, s.pane_id))
+            .collect()
+    };
+    for options in option_combinations() {
+        let representative = width_representative(&options);
+        // どの段階まで縮めても同じことを確かめるため、幅を変える
+        for cols in [10, 20, 40, 60, 80, 120, 200] {
+            assert_eq!(
+                widths(cols, &options),
+                widths(cols, &representative),
+                "{options:?} cols={cols}"
+            );
+        }
+    }
+}
+
 #[test]
 fn never_exceeds_width() {
     let agents = mixed_agents();
-    for options in option_combinations() {
+    for options in width_combinations() {
         for cols in 0..120 {
             let text = plain_with(&agents, cols, &options);
             assert!(
@@ -508,9 +536,9 @@ fn max_agent_width(max_agent_width: usize) -> ViewOptions {
 }
 
 /// 各エージェント分の幅（行頭の余白と区切りを除く）。行末の `~` は、切れたエージェントの分に数える
-fn agent_widths(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<usize> {
+fn agent_widths(spans: &[Span]) -> Vec<usize> {
     let mut widths: Vec<(u32, usize)> = vec![];
-    for span in layout(agents, cols, options) {
+    for span in spans {
         let Some(pane_id) = span.pane_id else {
             continue;
         };
@@ -683,18 +711,22 @@ fn max_agent_width_with_cwd_is_combined_with_row_width() {
 #[test]
 fn never_exceeds_max_agent_width() {
     let agents = mixed_agents();
-    for base in option_combinations() {
+    for base in width_combinations() {
         for max in MIN_MAX_AGENT_WIDTH..40 {
             let options = ViewOptions {
                 max_agent_width: Some(max),
                 ..base.clone()
             };
             for cols in 0..100 {
-                let text = plain_with(&agents, cols, &options);
-                let case = format!("{options:?} cols={cols}");
-                assert!(display_width(&text) <= cols, "{case}");
-                for width in agent_widths(&agents, cols, &options) {
-                    assert!(width <= max, "{case}: {text:?}");
+                // 回数が多いので、layout は 1 回だけ呼び、失敗時のメッセージは失敗したときだけ作る
+                let spans = layout(&agents, cols, &options);
+                let text = plain_text(&spans);
+                assert!(
+                    display_width(&text) <= cols,
+                    "{options:?} cols={cols}: {text:?}"
+                );
+                for width in agent_widths(&spans) {
+                    assert!(width <= max, "{options:?} cols={cols}: {text:?}");
                 }
             }
         }
@@ -1223,7 +1255,7 @@ fn name_in_badge_only_moves_badge_end_without_msg() {
         Some(MIN_MAX_AGENT_WIDTH),
         Some(DEFAULT_MAX_AGENT_WIDTH),
     ];
-    for base in option_combinations()
+    for base in width_combinations()
         .into_iter()
         .filter(|o| !o.name_in_badge)
     {
@@ -1239,9 +1271,12 @@ fn name_in_badge_only_moves_badge_end_without_msg() {
             for cols in 0..120 {
                 let with = plain_with(&agents, cols, &options);
                 let without = plain_with(&agents, cols, &base);
-                let case = format!("{options:?} cols={cols}");
-                assert_eq!(display_width(&with), display_width(&without), "{case}");
-                assert_eq!(strip(&with), strip(&without), "{case}");
+                assert_eq!(
+                    display_width(&with),
+                    display_width(&without),
+                    "{options:?} cols={cols}"
+                );
+                assert_eq!(strip(&with), strip(&without), "{options:?} cols={cols}");
             }
         }
     }

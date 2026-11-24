@@ -74,15 +74,13 @@ struct Agent {
 }
 
 impl Collector {
-    /// `ZellijPlugin::load` から呼ぶ。収集に使うイベントを購読する。
+    /// 収集に使うイベント。`ZellijPlugin::load` で購読する。
     /// 届くのは `ReadApplicationState` が許可された後（permission の要求は [`crate::permission`]）。
-    pub fn subscribe() {
-        subscribe(&[
-            EventType::PaneUpdate,
-            EventType::TabUpdate,
-            EventType::CwdChanged,
-        ]);
-    }
+    pub const EVENTS: &[EventType] = &[
+        EventType::PaneUpdate,
+        EventType::TabUpdate,
+        EventType::CwdChanged,
+    ];
 
     /// `ZellijPlugin::update` から呼ぶ。再描画が必要なときに true を返す。
     pub fn update(&mut self, event: &Event) -> bool {
@@ -111,6 +109,11 @@ impl Collector {
             title: agent.title.clone(),
             msg: agent.msg.clone(),
         })
+    }
+
+    /// ペイン `pane_id` のエージェントの状態。エージェントがいなければ None
+    pub fn state(&self, pane_id: u32) -> Option<AgentState> {
+        self.agents.get(&pane_id).map(|agent| agent.state)
     }
 
     /// `update` のうち、Zellij の API を呼ばない部分（テスト用に分けている）。
@@ -243,6 +246,29 @@ mod tests {
 
     fn tab_name_of(collector: &Collector, pane_id: u32) -> Option<String> {
         status_of(collector, pane_id)?.tab_name
+    }
+
+    #[test]
+    fn state_of_agent_pane() {
+        let mut collector = Collector::default();
+        collector.apply(&Event::PaneUpdate(manifest(vec![(
+            0,
+            vec![
+                terminal(1, vec![record(None, ProgramState::Blocked)]),
+                terminal(2, vec![]),
+            ],
+        )])));
+        assert_eq!(collector.state(1), Some(AgentState::Blocked));
+        // エージェントのいないペインと、存在しないペイン
+        assert_eq!(collector.state(2), None);
+        assert_eq!(collector.state(3), None);
+
+        // エージェントが消えたら None に戻る
+        collector.apply(&Event::PaneUpdate(manifest(vec![(
+            0,
+            vec![terminal(1, vec![])],
+        )])));
+        assert_eq!(collector.state(1), None);
     }
 
     #[test]
