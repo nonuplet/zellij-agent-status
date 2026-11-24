@@ -32,6 +32,11 @@ pub struct Focus {
 }
 
 impl Focus {
+    /// フォーカスの判定に使うイベント。`ZellijPlugin::load` で購読する。
+    /// `TabUpdate` は [`Focus::update`] では使わないが、選択モード中にフォーカスが移ったことに気づくために要る
+    /// （`main.rs` で、届くたびに [`focused_now`] で確かめる）
+    pub const EVENTS: &[EventType] = &[EventType::PaneUpdate, EventType::TabUpdate];
+
     pub fn new(plugin_id: u32) -> Self {
         Focus {
             plugin_id: Some(plugin_id),

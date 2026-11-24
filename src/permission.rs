@@ -26,14 +26,16 @@ pub enum Permission {
 }
 
 impl Permission {
-    /// `ZellijPlugin::load` から呼ぶ。permission を要求し、結果のイベントを購読する。
+    /// 要求の結果を受け取るイベント。`ZellijPlugin::load` で購読する。
+    pub const EVENTS: &[EventType] = &[EventType::PermissionRequestResult];
+
+    /// `ZellijPlugin::load` から呼ぶ。permission を要求する。
     pub fn request() {
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::InterceptInput,
         ]);
-        subscribe(&[EventType::PermissionRequestResult]);
     }
 
     /// `PermissionRequestResult` を受け取ったときに呼ぶ。再描画が必要なときに true を返す。

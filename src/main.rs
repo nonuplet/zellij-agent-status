@@ -19,6 +19,13 @@ use view::{Line, Theme};
 /// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
 const MESSAGE_PREFIX: &str = "zellij-agent-status: ";
 
+/// ここ（`main.rs`）で直接処理するイベント。ほかのイベントは、使うモジュールがそれぞれの `EVENTS` に持つ
+const EVENTS: &[EventType] = &[
+    EventType::ModeUpdate,
+    EventType::Mouse,
+    EventType::InterceptedKeyPress,
+];
+
 #[derive(Default)]
 struct State {
     permission: Permission,
@@ -57,12 +64,8 @@ impl ZellijPlugin for State {
 
         // 許可が出るまで selectable のままにする処理は Permission が持つ
         Permission::request();
-        Collector::subscribe();
-        subscribe(&[
-            EventType::ModeUpdate,
-            EventType::Mouse,
-            EventType::InterceptedKeyPress,
-        ]);
+        // 同じイベントを複数のモジュールが使っていてもよい（重複は subscribe がまとめる）
+        subscribe(&[Permission::EVENTS, Collector::EVENTS, Focus::EVENTS, EVENTS].concat());
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -79,7 +82,7 @@ impl ZellijPlugin for State {
             _ => {
                 self.focus.update(&event);
                 let changed = self.collector.update(&event);
-                // フォーカスの移動は PaneUpdate / TabUpdate で届く
+                // フォーカスの移動は PaneUpdate / TabUpdate で届く（購読は Focus::EVENTS）
                 let moved = matches!(event, Event::PaneUpdate(_) | Event::TabUpdate(_))
                     && self.leave_on_focus_change();
                 moved || changed

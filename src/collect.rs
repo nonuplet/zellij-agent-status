@@ -74,15 +74,13 @@ struct Agent {
 }
 
 impl Collector {
-    /// `ZellijPlugin::load` から呼ぶ。収集に使うイベントを購読する。
+    /// 収集に使うイベント。`ZellijPlugin::load` で購読する。
     /// 届くのは `ReadApplicationState` が許可された後（permission の要求は [`crate::permission`]）。
-    pub fn subscribe() {
-        subscribe(&[
-            EventType::PaneUpdate,
-            EventType::TabUpdate,
-            EventType::CwdChanged,
-        ]);
-    }
+    pub const EVENTS: &[EventType] = &[
+        EventType::PaneUpdate,
+        EventType::TabUpdate,
+        EventType::CwdChanged,
+    ];
 
     /// `ZellijPlugin::update` から呼ぶ。再描画が必要なときに true を返す。
     pub fn update(&mut self, event: &Event) -> bool {
