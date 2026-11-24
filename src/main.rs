@@ -5,12 +5,12 @@ mod permission;
 mod select;
 mod view;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 use collect::Collector;
 use config::Config;
-use model::AgentStatus;
+use model::{AgentState, AgentStatus};
 use permission::Permission;
 use select::focus::{self, Focus};
 use select::{KeyAction, PIPE_NAME};
@@ -225,17 +225,12 @@ impl State {
 
     /// 選択モードで最初に選ぶエージェント（[`select::initial`]）。`focused` はフォーカス中のターミナルペイン
     fn initial_selection(&self, focused: Option<u32>) -> Option<u32> {
-        let attention: HashSet<u32> = self
-            .collector
-            .statuses()
-            .filter(|s| s.state.needs_attention())
-            .map(|s| s.pane_id)
-            .collect();
-        select::initial(
-            &self.line.pane_ids(),
-            |pane_id| attention.contains(&pane_id),
-            focused,
-        )
+        let needs_attention = |pane_id| {
+            self.collector
+                .state(pane_id)
+                .is_some_and(AgentState::needs_attention)
+        };
+        select::initial(&self.line.pane_ids(), needs_attention, focused)
     }
 
     fn line(&self, cols: usize) -> Line {

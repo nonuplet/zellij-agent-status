@@ -111,6 +111,11 @@ impl Collector {
         })
     }
 
+    /// ペイン `pane_id` のエージェントの状態。エージェントがいなければ None
+    pub fn state(&self, pane_id: u32) -> Option<AgentState> {
+        self.agents.get(&pane_id).map(|agent| agent.state)
+    }
+
     /// `update` のうち、Zellij の API を呼ばない部分（テスト用に分けている）。
     fn apply(&mut self, event: &Event) -> bool {
         match event {
@@ -241,6 +246,29 @@ mod tests {
 
     fn tab_name_of(collector: &Collector, pane_id: u32) -> Option<String> {
         status_of(collector, pane_id)?.tab_name
+    }
+
+    #[test]
+    fn state_of_agent_pane() {
+        let mut collector = Collector::default();
+        collector.apply(&Event::PaneUpdate(manifest(vec![(
+            0,
+            vec![
+                terminal(1, vec![record(None, ProgramState::Blocked)]),
+                terminal(2, vec![]),
+            ],
+        )])));
+        assert_eq!(collector.state(1), Some(AgentState::Blocked));
+        // エージェントのいないペインと、存在しないペイン
+        assert_eq!(collector.state(2), None);
+        assert_eq!(collector.state(3), None);
+
+        // エージェントが消えたら None に戻る
+        collector.apply(&Event::PaneUpdate(manifest(vec![(
+            0,
+            vec![terminal(1, vec![])],
+        )])));
+        assert_eq!(collector.state(1), None);
     }
 
     #[test]
