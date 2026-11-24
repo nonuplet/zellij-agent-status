@@ -46,7 +46,7 @@ Zellij 0.46 は OSC 7501 を自前でパースし、結果を `PaneUpdate` の `
 
 ## イベントの届き方
 
-- 必要な permission は `ReadApplicationState` と `ChangeApplicationState`（クリックでペインにフォーカスを移すために使う）。
+- 状態の収集に使うイベントを受け取るのに必要な permission は `ReadApplicationState`。このプラグインは、ほかの操作のための permission も要求する（一覧は `src/permission.rs`）。
 - ルートレコードを更新すると、内容が同じでも必ず `PaneUpdate` が届く。
   - attention が変わった場合の順序：`PaneAttentionChanged` → `PaneUpdate`（約 10ms 後）→ `TabUpdate` → `GlobalAttentionUpdate`
 - **`id` 付きレコードだけの更新では、イベントが届かない。** ただし attention が変わる場合は届く。

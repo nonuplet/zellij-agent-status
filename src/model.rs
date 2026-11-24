@@ -24,7 +24,7 @@ pub struct AgentStatus {
     pub state: AgentState,
     /// 0〜100
     pub progress: Option<u8>,
-    /// 送信元のアプリ名（例：`claude`）
+    /// 送信元のアプリ名（例：`claude-code`）
     pub app: Option<String>,
     /// base64 デコード済み
     pub title: Option<String>,
@@ -47,8 +47,8 @@ pub enum AgentState {
 
 impl AgentState {
     /// 注意が必要な状態か（`Blocked` / `Error`）。
-    /// view の強調（`highlight_attention`）と msg の表示（`msg_mode`）が同じ判定を使い、
-    /// 強調するエージェントと msg を表示するエージェントがずれないようにする。
+    /// view の強調（`highlight_attention`）と msg の表示（`msg_mode`）、選択モードで最初に選ぶエージェント
+    /// （[`crate::select`]）が同じ判定を使い、対象のエージェントがずれないようにする。
     pub fn needs_attention(self) -> bool {
         matches!(self, AgentState::Blocked | AgentState::Error)
     }

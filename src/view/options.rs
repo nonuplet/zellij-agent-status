@@ -35,7 +35,7 @@ pub struct ViewOptions {
     /// 名前の前に `app` のアイコンを付けるか。名前の候補（[`ViewOptions::use_app_name`]）とは独立
     pub show_app_icon: bool,
     /// Nerd Font のアイコン（状態アイコンと `app` のアイコン）の右隣に空白を置くか。
-    /// グリフが 1 桁からはみ出すかどうかはプログラムからは判別できないため、設定にしている。
+    /// 設定にしている理由は [`app_icon`](super::icon::app_icon) を参照
     pub nerd_font_icon_padding: bool,
     /// 注意が必要な状態（[`AgentState::needs_attention`]）のエージェントを、1 つ分全体を状態の色で塗って強調するか
     pub highlight_attention: bool,
