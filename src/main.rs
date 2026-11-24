@@ -13,7 +13,7 @@ use config::Config;
 use model::{AgentState, AgentStatus};
 use permission::Permission;
 use select::focus::{self, Focus};
-use select::{KeyAction, PIPE_NAME};
+use select::{Effect, PIPE_NAME, SelectMode};
 use view::{Line, Theme};
 
 /// 表示するメッセージとログ（`eprintln!`）の先頭に付ける、どのプラグインからのものかを示す名前
@@ -37,17 +37,7 @@ struct State {
     /// 最後に描画した行。クリックされた列のエージェントや、キー操作で選べるエージェントを引くのに使う
     line: Line,
     focus: Focus,
-    /// 選択モード中なら Some
-    selection: Option<Selection>,
-}
-
-/// 選択モードの状態
-struct Selection {
-    /// 選んでいるエージェントのペインの id
-    pane_id: u32,
-    /// 選択モードに入ったときにフォーカスしていたペイン（[`focus::focused_now`]）。
-    /// ほかのペインやタブがクリックされるなどして変わったら、選択モードを抜ける
-    focused: PaneId,
+    select: SelectMode,
 }
 
 register_plugin!(State);
@@ -84,7 +74,7 @@ impl ZellijPlugin for State {
                 let changed = self.collector.update(&event);
                 // フォーカスの移動は PaneUpdate / TabUpdate で届く（購読は Focus::EVENTS）
                 let moved = matches!(event, Event::PaneUpdate(_) | Event::TabUpdate(_))
-                    && self.leave_on_focus_change();
+                    && run(self.select.on_focus(focus::focused_now));
                 moved || changed
             }
         }
@@ -99,9 +89,14 @@ impl ZellijPlugin for State {
             return;
         }
         self.line = self.line(cols);
-        self.keep_selection_visible();
-        let selected = self.selection.as_ref().map(|s| s.pane_id);
-        print!("{}", self.line.paint(&self.theme, selected));
+        // 選べるエージェントは行の内容で決まるので、選び直しはここで行う。
+        // Zellij の API は標準出力で命令を送るので、行の出力より前に済ませる
+        run(self.select.keep_visible(
+            &self.line.pane_ids(),
+            needs_attention(&self.collector),
+            focus::focused_now,
+        ));
+        print!("{}", self.line.paint(&self.theme, self.select.selected()));
     }
 }
 
@@ -116,7 +111,7 @@ impl State {
             mouse,
             Mouse::LeftClick(..) | Mouse::RightClick(..) | Mouse::DoubleClick(..)
         );
-        let left = clicked && self.leave();
+        let left = clicked && run(self.select.leave());
         if let Mouse::LeftClick(_, col) = mouse
             && let Some(pane_id) = self.line.pane_at(col)
         {
@@ -127,110 +122,27 @@ impl State {
 
     /// パイプを受け取ったら選択モードに入る。
     /// パイプは全インスタンスに届くので、アクティブなタブにいるインスタンスだけが入る。
-    /// 表示中のエージェントがなければ入らない。
+    /// 再描画が必要なときに true を返す。
     fn enter(&mut self) -> bool {
-        if self.selection.is_some() || self.permission != Permission::Granted {
+        if self.select.is_active() || self.permission != Permission::Granted {
             return false;
         }
         // フォーカスはその場で問い合わせる（イベントから求めると古くなることがある。select::focus を参照）
-        let Some(focused) = focus::focused_now() else {
+        let Some(focused) = focus::focused_now().filter(|&pane| self.focus.owns(pane)) else {
             return false;
         };
-        if !self.focus.owns(focused) {
-            return false;
-        }
-        let Some(pane_id) = self.initial_selection(focus::terminal_id(focused)) else {
-            return false;
-        };
-        intercept_key_presses();
-        self.selection = Some(Selection { pane_id, focused });
-        true
-    }
-
-    /// 選択モードを抜ける。横取りも必ずやめる。選択モード中だったときに true を返す
-    fn leave(&mut self) -> bool {
-        let left = self.selection.take().is_some();
-        if left {
-            clear_key_presses_intercepts();
-        }
-        left
+        run(self.select.enter(
+            focused,
+            &self.line.pane_ids(),
+            needs_attention(&self.collector),
+        ))
     }
 
     /// 選択モード中に横取りしたキーを処理する。再描画が必要なときに true を返す。
     fn key(&mut self, key: &KeyWithModifier) -> bool {
-        if self.selection.is_none() {
-            // 選択モードでないのに届いたら、横取りが残っているので念のためやめる
-            clear_key_presses_intercepts();
-            return false;
-        }
-        // 選択中にタブが切り替わっても、バックグラウンドになったインスタンスには TabUpdate が届かず気づけない。
-        // キーが届いた時点で確かめ、自分のタブがアクティブでなくなっていたら、そのキーは捨てて選択モードを抜ける
-        if !focus::focused_now().is_some_and(|pane| self.focus.owns(pane)) {
-            return self.leave();
-        }
-        let Some(selection) = &mut self.selection else {
-            return false;
-        };
-        match KeyAction::from_key(key) {
-            None => false,
-            Some(KeyAction::Move(step)) => {
-                let pane_id = select::step(&self.line.pane_ids(), selection.pane_id, step);
-                let changed = pane_id != selection.pane_id;
-                selection.pane_id = pane_id;
-                changed
-            }
-            Some(KeyAction::Confirm) => {
-                let pane_id = selection.pane_id;
-                self.leave();
-                focus_terminal_pane(pane_id, false, false);
-                true
-            }
-            Some(KeyAction::Cancel) => self.leave(),
-        }
-    }
-
-    /// 選択モード中にフォーカスが移ったら（ほかのペインやタブがクリックされたときなど）、選択モードを抜ける。
-    /// 入ったときと同じく、フォーカスはその場で問い合わせて比べる。問い合わせに失敗したときも抜ける
-    fn leave_on_focus_change(&mut self) -> bool {
-        let Some(selection) = &self.selection else {
-            return false;
-        };
-        if focus::focused_now() == Some(selection.focused) {
-            return false;
-        }
-        self.leave()
-    }
-
-    /// 選んでいたエージェントが行から消えたら、最初に選ぶときと同じ順で選び直す。
-    /// 表示中のエージェントがなくなったら、選択モードを抜ける。
-    fn keep_selection_visible(&mut self) {
-        let Some(selection) = &self.selection else {
-            return;
-        };
-        if self.line.pane_ids().contains(&selection.pane_id) {
-            return;
-        }
-        let focused = focus::focused_now().and_then(focus::terminal_id);
-        match self.initial_selection(focused) {
-            Some(pane_id) => {
-                if let Some(selection) = &mut self.selection {
-                    selection.pane_id = pane_id;
-                }
-            }
-            None => {
-                self.leave();
-            }
-        }
-    }
-
-    /// 選択モードで最初に選ぶエージェント（[`select::initial`]）。`focused` はフォーカス中のターミナルペイン
-    fn initial_selection(&self, focused: Option<u32>) -> Option<u32> {
-        let needs_attention = |pane_id| {
-            self.collector
-                .state(pane_id)
-                .is_some_and(AgentState::needs_attention)
-        };
-        select::initial(&self.line.pane_ids(), needs_attention, focused)
+        run(self.select.key(key, &self.line.pane_ids(), || {
+            focus::focused_now().is_some_and(|pane| self.focus.owns(pane))
+        }))
     }
 
     fn line(&self, cols: usize) -> Line {
@@ -250,6 +162,31 @@ impl State {
 
     fn message(&self, text: &str, cols: usize) -> Line {
         view::render_message(&format!("{MESSAGE_PREFIX}{text}"), cols)
+    }
+}
+
+/// 選択モードの遷移の結果に従って、Zellij の API を呼ぶ。再描画が必要なときに true を返す。
+/// キーの横取りを始めるのもやめるのも、ここだけで行う。
+fn run(effect: Effect) -> bool {
+    match effect {
+        Effect::None => return false,
+        Effect::Redraw => {}
+        Effect::Enter => intercept_key_presses(),
+        Effect::Leave => clear_key_presses_intercepts(),
+        Effect::Confirm(pane_id) => {
+            clear_key_presses_intercepts();
+            focus_terminal_pane(pane_id, false, false);
+        }
+    }
+    true
+}
+
+/// ペインのエージェントが、注意が必要な状態か（[`AgentState::needs_attention`]）の判定
+fn needs_attention(collector: &Collector) -> impl Fn(u32) -> bool + '_ {
+    |pane_id| {
+        collector
+            .state(pane_id)
+            .is_some_and(AgentState::needs_attention)
     }
 }
 

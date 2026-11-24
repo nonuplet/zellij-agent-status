@@ -2,16 +2,22 @@
 //!
 //! 選択モードには、ユーザが `config.kdl` の `keybinds` に書いたキーバインドから届くパイプ（[`PIPE_NAME`]）で入る
 //! （書き方は README）。プラグインからはキーを登録しない。入ってからは
-//! `intercept_key_presses` でキーを横取りし、[`KeyAction`] に従って選択を動かす（API の呼び出しは `main.rs`）。
-//! ここには、そのうち Zellij の API を呼ばない部分（キーの意味・最初の選択・選択の移動）を置く。
+//! `intercept_key_presses` でキーを横取りし、[`KeyAction`] に従って選択を動かす。
+//! 選択モードの状態と遷移は [`SelectMode`] が持ち、API の呼び出しは、遷移が返す [`Effect`] に従って `main.rs` が行う。
 //!
 //! 選択は位置ではなくペインの id で持つ。選択中にエージェントが増減したり並びが変わったりしても、
 //! 同じエージェントを選び続けるようにするため。選べるのは、その時点の行に表示されているエージェント
 //! （[`Line::pane_ids`](crate::view::Line::pane_ids)）だけにする。
 //!
+//! - [`mode`]：選択モードの状態と遷移
 //! - [`focus`]：このプラグインのタブがアクティブか、フォーカス中のペインはどれかの判定
+//!
+//! このモジュール自体には、遷移で使うキーの意味・最初の選択・選択の移動を置く。
 
 pub mod focus;
+mod mode;
+
+pub use mode::{Effect, SelectMode};
 
 use zellij_tile::prelude::*;
 
@@ -22,7 +28,7 @@ pub const PIPE_NAME: &str = "zellij-agent-status::select";
 
 /// 選択モード中のキーの意味
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyAction {
+enum KeyAction {
     /// 選択を動かす
     Move(Step),
     /// 選んだエージェントのペインにフォーカスし、選択モードを抜ける
@@ -33,7 +39,7 @@ pub enum KeyAction {
 
 /// 選択を動かす向き。Zellij の `Direction`（上下左右）とは別のもの
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Step {
+enum Step {
     /// 左（前）のエージェントを選ぶ
     Prev,
     /// 右（次）のエージェントを選ぶ
@@ -42,7 +48,7 @@ pub enum Step {
 
 impl KeyAction {
     /// 横取りしたキーの意味。None のキーは無視する（選択モードは続く）
-    pub fn from_key(key: &KeyWithModifier) -> Option<Self> {
+    fn from_key(key: &KeyWithModifier) -> Option<Self> {
         let plain = |bare| key.is_key_without_modifier(bare);
         if plain(BareKey::Left) || plain(BareKey::Char('h')) {
             Some(KeyAction::Move(Step::Prev))
@@ -64,7 +70,7 @@ impl KeyAction {
 /// 3. 左端のエージェント
 ///
 /// 表示中のエージェントがなければ None（選択モードに入らない）。
-pub fn initial(
+fn initial(
     order: &[u32],
     needs_attention: impl Fn(u32) -> bool,
     focused: Option<u32>,
@@ -79,7 +85,7 @@ pub fn initial(
 
 /// `current` から左右に 1 つ動かす。端まで来たら反対側に戻る。
 /// `current` が表示されていなければ、そのまま返す（呼び出し側で選び直す）。
-pub fn step(order: &[u32], current: u32, step: Step) -> u32 {
+fn step(order: &[u32], current: u32, step: Step) -> u32 {
     let Some(index) = order.iter().position(|&id| id == current) else {
         return current;
     };
