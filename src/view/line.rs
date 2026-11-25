@@ -22,7 +22,7 @@ impl Line {
     }
 
     /// ANSI エスケープ付きの文字列にする。末尾は背景色の空白で埋める。
-    /// `selected` が Some なら選択モードの色にする（行の色を変え、バッジは選んでいるエージェントだけに残す。[`paint`] を参照）。
+    /// `selected` が Some なら選択モードの色にする（行の色を変え、選んでいるエージェントだけを色の塊で描く。[`paint`] を参照）。
     pub fn paint(&self, theme: &Theme, selected: Option<u32>) -> String {
         paint(&self.spans, self.cols, theme, selected)
     }

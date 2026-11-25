@@ -3,7 +3,7 @@
 
 use zellij_tile::graphemes::display_width;
 
-use super::test_support::{agent, with_msg};
+use super::test_support::{agent, with_cwd, with_msg};
 use super::theme::Color;
 use super::*;
 use crate::model::AgentState;
@@ -290,6 +290,77 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
         .map(|s| &s[s.find('m').unwrap() + 1..])
         .collect();
     assert_eq!(filled.concat(), " ↻ two ", "{selected:?}");
+}
+
+/// 選択モードの色（[`test_theme`]）を反転させて塗った部分の文字。文字も背景も反転していることを確かめる
+fn inverted_text(line: &str) -> String {
+    line.split('\x1b')
+        .filter_map(|s| s.split_once('m'))
+        .filter(|(sgr, _)| sgr.contains("48;5;15"))
+        .map(|(sgr, text)| {
+            assert!(sgr.ends_with("38;5;236;48;5;15"), "{line:?}");
+            text
+        })
+        .collect()
+}
+
+#[test]
+fn selection_mode_inverts_selected_emoji_agent_up_to_name() {
+    let mut one = with_cwd(
+        with_msg(agent(1, AgentState::Working), "Running"),
+        "/repo/main",
+    );
+    one.progress = Some(42);
+    let two = with_msg(agent(2, AgentState::Error), "failed");
+    let a = [one, two];
+    for name_in_badge in [false, true] {
+        let emoji = ViewOptions {
+            state_icon_style: StateIconStyle::Emoji,
+            show_cwd: true,
+            msg_mode: MsgMode::All,
+            name_in_badge,
+            ..Default::default()
+        };
+        let line = render_line(&a, 80, &emoji);
+        let unselected = line.paint(&test_theme(), None);
+        assert_eq!(
+            strip_ansi(&unselected).trim_end(),
+            " ⏳ 42% claude (main): Running  ❌ claude: failed"
+        );
+        // 普段は塗らない
+        assert!(!unselected.contains("48;5;"), "{unselected:?}");
+
+        // 選んでいるエージェントだけを、名前（と cwd）まで塗る。msg は塗らない。文字は変えない
+        for (pane_id, expected) in [(1, "⏳ 42% claude (main)"), (2, "❌ claude")] {
+            let selected = line.paint(&test_theme(), Some(pane_id));
+            assert_eq!(inverted_text(&selected), expected, "{selected:?}");
+            assert_eq!(strip_ansi(&selected), strip_ansi(&unselected));
+        }
+
+        // 幅が足りず名前を省いても、アイコンと進捗を塗るので見分けられる
+        let line = render_line(&a, 14, &emoji);
+        for (pane_id, expected) in [(1, "⏳ 42%"), (2, "❌")] {
+            let selected = line.paint(&test_theme(), Some(pane_id));
+            assert_eq!(strip_ansi(&selected), " ⏳ 42%  ❌   ");
+            assert_eq!(inverted_text(&selected), expected, "{selected:?}");
+        }
+
+        // 強調するエージェントは状態の色で全体を塗るので、選んでも反転させない
+        let highlight = ViewOptions {
+            highlight_attention: true,
+            ..emoji
+        };
+        let line = render_line(&a, 80, &highlight);
+        let selected = line.paint(&test_theme(), Some(2));
+        assert_eq!(inverted_text(&selected), "", "{selected:?}");
+        assert!(
+            selected.contains("\x1b[0;38;2;1;2;3;48;5;1mfailed"),
+            "{selected:?}"
+        );
+        let selected = line.paint(&test_theme(), Some(1));
+        assert_eq!(inverted_text(&selected), "⏳ 42% claude (main)");
+        assert!(!selected.contains("48;5;1m"), "{selected:?}");
+    }
 }
 
 #[test]

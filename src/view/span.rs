@@ -27,6 +27,9 @@ pub(super) enum Fill {
     None,
     /// 状態の色で塗る（バッジ）。文字は行の背景色にして、色を反転させる。
     State(AgentState),
+    /// 選択モードで選んでいるときだけ、行の文字色と背景色を反転させる（バッジにしない絵文字アイコンで、バッジの代わりにする）。
+    /// それ以外のときは行の背景色のまま。
+    Selected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

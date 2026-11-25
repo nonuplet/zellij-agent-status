@@ -985,12 +985,12 @@ fn nerd_font_icon_padding_puts_space_after_every_nerd_icon() {
     }
 }
 
-/// 状態の色で塗った部分を、続いている範囲ごとにまとめたもの
+/// 状態の色で塗った部分を、続いている範囲ごとにまとめたもの（選んでいるときだけ塗る部分は含まない）
 fn filled_runs(agents: &[AgentStatus], cols: usize, options: &ViewOptions) -> Vec<String> {
     let mut runs: Vec<String> = vec![];
     let mut prev = Fill::None;
     for span in layout(agents, cols, options) {
-        if span.fill != Fill::None {
+        if matches!(span.fill, Fill::State(_)) {
             match runs.last_mut() {
                 Some(run) if span.fill == prev => run.push_str(&span.text),
                 _ => runs.push(span.text),

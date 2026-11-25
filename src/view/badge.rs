@@ -9,6 +9,8 @@
 //! （[`BadgeExtent::msg_separator`]）。
 //! バッジの両端には [`ViewOptions::badge_shape`] の形の端の文字を付ける（[`BadgeShape::spans`]）。
 //! 絵文字アイコンは自分の色を持っていて、背景も塗ると色が二重になるので、バッジにせず端の文字も付けない。
+//! 選択モードで選んでいるときだけ、状態の色ではなく、行の文字色と背景色を反転させて塗る（[`BadgeExtent::fill`]）。
+//! ただし、[`ViewOptions::highlight_attention`] で強調するエージェントは、選んでいるときも状態の色で塗る。
 //!
 //! 名前までバッジに入れるのは、アイコンの右がバッジの右端の文字に重なったり切れたりするのを避けるため。
 //! アイコンは 1 桁から右にはみ出して描かれることがある（[`app_icon`] を参照。記号のアイコンでも右の余白が少ないものがある）。
@@ -95,13 +97,16 @@ pub(super) enum BadgeExtent {
 }
 
 impl BadgeExtent {
-    /// 先頭から何部分をバッジに入れるか
-    pub(super) fn parts(self) -> usize {
+    /// (先頭から何部分を塗るか, その塗り方)。
+    /// バッジにしないときは、選択モードで選んでいるときだけ名前まで（既定のバッジと同じ範囲）を塗る。
+    /// 先頭から塗るので、名前を省いてもアイコンが塗られ、どれを選んでいるかが分かる。
+    /// msg まで塗ると、msg の文字のほうが名前より目立ってしまうので塗らない。
+    pub(super) fn fill(self, state: AgentState) -> (usize, Fill) {
         match self {
-            BadgeExtent::None => 0,
-            BadgeExtent::Head => 1,
-            BadgeExtent::Label => 2,
-            BadgeExtent::Whole => 3,
+            BadgeExtent::None => (2, Fill::Selected),
+            BadgeExtent::Head => (1, Fill::State(state)),
+            BadgeExtent::Label => (2, Fill::State(state)),
+            BadgeExtent::Whole => (3, Fill::State(state)),
         }
     }
 

@@ -63,7 +63,8 @@ impl fmt::Display for Sgr {
 pub struct Theme {
     pub fg: Color,
     pub bg: Color,
-    /// 選択モード中に、行全体（バッジ以外）に使う文字色と背景色。行全体の色を変えて選択モードだと分かるようにする
+    /// 選択モード中に、行全体（バッジ以外）に使う文字色と背景色。行全体の色を変えて選択モードだと分かるようにする。
+    /// バッジにならないエージェントを選んでいるときは、入れ替えて使う（[`Fill::Selected`](super::span::Fill::Selected)）
     pub select_fg: Color,
     pub select_bg: Color,
     pub idle: Color,
