@@ -17,8 +17,11 @@ use super::theme::{Color, Theme};
 ///   行全体の色が変わるので、選択モードだと分かる。バッジの端の文字の外側も同じ背景色になる
 /// - 選んでいないエージェントはバッジを外す（状態の色で塗らず、状態の色の文字にする）。
 ///   バッジの端の文字は背景と同じ色にして見えなくする
+/// - 選んでいるエージェントがバッジにならない（絵文字アイコン）なら、バッジの代わりに、文字色と背景色を反転させて塗る
+///   （[`Fill::Selected`]）。状態の色で塗ると、色の近い絵文字が見えにくくなるため。
+///   `highlight_attention` で強調するエージェントは、絵文字アイコンでも普段から状態の色で塗るので、反転させない
 ///
-/// 色の塊（バッジ）で描くのは選んでいるエージェントだけになるので、msg の有無やバッジの範囲（`name_in_badge` など）に
+/// 色の塊で描くのは選んでいるエージェントだけになるので、msg の有無やバッジの範囲（`name_in_badge` など）に
 /// 関係なく、どれを選んでいるかが分かる。選んでいるエージェントのバッジは普段と同じ色で描く
 /// （反転すると、バッジが背景と同化して見づらくなるため）。
 pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme, selected: Option<u32>) -> String {
@@ -43,7 +46,8 @@ pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme, selected: Option
         };
         let (fg, bg) = match span.fill {
             Fill::State(state) if !dimmed => (theme.bg.fg(), theme.state(state).bg()),
-            Fill::None | Fill::State(_) => (fg.fg(), line_bg.bg()),
+            Fill::Selected if selected.is_some() && !dimmed => (line_bg.fg(), text_fg.bg()),
+            Fill::None | Fill::State(_) | Fill::Selected => (fg.fg(), line_bg.bg()),
         };
         let bold = if bold { "1;" } else { "" };
         // String への write! は失敗しないので、結果は捨てる

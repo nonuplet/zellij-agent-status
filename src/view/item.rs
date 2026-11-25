@@ -18,7 +18,7 @@ use zellij_tile::graphemes::display_width;
 
 use super::ViewOptions;
 use super::badge::{BadgeExtent, BadgeStyle};
-use super::span::{Fill, Role, Span, width};
+use super::span::{Role, Span, width};
 use super::text::{clean, dir_name, truncate};
 use crate::model::{AgentState, AgentStatus};
 
@@ -159,6 +159,7 @@ impl Item {
     /// 3 つの部分（[`BadgeExtent`] を参照）に分け、先頭から [`Item::extent`] の部分までをバッジに入れる（塗る）。
     /// バッジの右端（と内側の空白）は、バッジに入れた部分の直後に置く。
     /// 名前を省いたときは名前の部分が空になるので、右端はアイコンと進捗の直後に来る。
+    /// バッジにしないときは、選んでいるときだけ塗る部分に印を付ける（[`BadgeExtent::fill`]。端の文字はない）。
     ///
     /// どの Span にもこのエージェントのペインを持たせ、1 エージェント分のどこをクリックしてもフォーカスできるようにする。
     pub(super) fn spans(&self, widths: Widths) -> Vec<Span> {
@@ -178,13 +179,13 @@ impl Item {
             }
         }
 
-        let fill = Fill::State(self.state);
+        let (filled, fill) = self.extent.fill(self.state);
         let mut parts = [self.head.clone(), label, msg].into_iter();
         let mut spans = self.left.clone();
         spans.extend(
             parts
                 .by_ref()
-                .take(self.extent.parts())
+                .take(filled)
                 .flatten()
                 .map(|s| s.with_fill(fill)),
         );
