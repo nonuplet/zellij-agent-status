@@ -26,7 +26,11 @@ description: 表示系の変更を人間が目視で検証するための、検�
 3. `dev.kdl` を Read し、それをベースにして、`tmp/<トピック>/NN-<観点>.kdl` を Write で作る（例：`tmp/badge-shape/01-states.kdl`）。`tmp/` は作業中の worktree の直下のもの。同じ名前の別の検証があれば、上書きせずトピック名を変える。
 4. 最後の「報告の形」で会話に出して終わる。チェックリストのファイルは作らない。
 
-1 つのファイルに別の観点のタブを混ぜない。プラグインはセッション内の全タブのエージェントを表示するので、観点同士のエージェントが混ざる。タブを増やすのは、タブをまたぐ動きやタブ名を検証するときだけ。
+1 つのファイルに別の観点のタブを混ぜない。プラグインはセッション内の全タブのエージェントを表示するので、観点同士のエージェントが混ざる。タブを増やすのは、タブをまたぐ動きやタブ名を検証するときと、設定を見比べるときだけ。
+
+プラグインの行は、どのファイルでも 1 タブに 1 行だけにする。理由は次の 2 つ。
+- 1 行の固定ペインを同じタブに縦に並べると、Zellij が上の行を描かない（下の 2 行しか表示されない）。組み込みのプラグインでも起こる、Zellij 側の問題（#60）
+- 同じタブに複数あると、選択モードにすべてが入ってしまう
 
 ## dev.kdl からの変更点
 
@@ -69,22 +73,46 @@ scripts/osc7501.sh <state> [-a APP] [-k KIND] [-p 0〜100] [-t TITLE] [-m MSG]
 
 ### 設定の見比べ
 
-同じエージェントを設定違いで見比べるときは、プラグインの行を縦に並べ、何行目がどの設定かをコメントと報告の両方に書く。
+同じエージェントを設定違いで見比べるときは、設定ごとにタブを分け、タブを切り替えて見比べる。`layout` の中身を次の形に替える。
+
+- エージェントのペインは最初のタブにだけ置く。プラグインは全タブのエージェントを表示するので、どのタブからも同じエージェントが見える。
+- タブ名は設定を表す名前にし、どのタブがどの設定かをコメントと報告の両方に書く。
+- 開き直し用の `bash` ペインは置かない（開き直すとタブが増えるため）。
 
 ```kdl
-    // 1 行目：既定
-    pane size=1 borderless=true {
-        plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm"
-    }
-    // 2 行目：badge_shape "round"
-    pane size=1 borderless=true {
-        plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm" {
-            badge_shape "round"
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        children
+        pane size=2 borderless=true {
+            plugin location="zellij:status-bar"
         }
     }
+    // タブ default：既定
+    tab name="default" focus=true {
+        pane split_direction="vertical" {
+            pane command="bash" name="one" {
+                args "-c" "scripts/osc7501.sh working -t one"
+            }
+        }
+        pane focus=true
+        pane size=1 borderless=true {
+            plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm"
+        }
+    }
+    // タブ round：badge_shape "round"
+    tab name="round" {
+        pane
+        pane size=1 borderless=true {
+            plugin location="file:target/wasm32-wasip1/debug/zellij-agent-status.wasm" {
+                badge_shape "round"
+            }
+        }
+    }
+}
 ```
-
-クリックや選択モードを検証するファイルでは、プラグインは 1 タブに 1 行だけにする。同じタブに複数あると、すべてが選択モードに入ってしまう。
 
 ### 幅
 
@@ -148,7 +176,7 @@ zellij --layout tmp/<トピック>/01-<観点>.kdl
 | ファイル名 | 検証内容 |
 |---|---|
 | `01-states` | 5 つの状態が色分けされたバッジで並び、msg は `three` と `five` だけに出る |
-| `02-badge-shape` | 下の行だけ、バッジの端が半円になる（上から既定・`round`） |
+| `02-badge-shape` | タブ `round` でだけ、バッジの端が半円になる（タブ `default` は既定） |
 | `03-focus` | 【操作】`two` をクリックする → タブ `two` に移る |
 ````
 
