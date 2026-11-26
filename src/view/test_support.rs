@@ -2,9 +2,11 @@
 
 use unicode_width::UnicodeWidthStr;
 
-use super::{BadgeShape, MsgMode, StateIconStyle, ViewOptions};
+use super::{BadgeShape, Element, MsgMode, StateIconStyle, ViewOptions};
 use crate::model::{AgentState, AgentStatus};
 
+/// 既定の `badge_items`（`title tab_name`）で名前が表示されるよう、`title` を持たせる。
+/// `app` と同じ文字列にしているので、`app_name` を表示しても同じ名前になる
 pub(super) fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
     AgentStatus {
         pane_id,
@@ -14,7 +16,7 @@ pub(super) fn agent(pane_id: u32, state: AgentState) -> AgentStatus {
         state,
         progress: None,
         app: Some("claude".to_owned()),
-        title: None,
+        title: Some("claude".to_owned()),
         msg: None,
     }
 }
@@ -54,8 +56,28 @@ pub(super) fn state_icons(state_icon_style: StateIconStyle) -> ViewOptions {
     }
 }
 
-/// アイコン・cwd・バッジの端の形・`app` のアイコン・強調・アイコンの後ろの空白・バッジの中の名前・
-/// msg の表示モードの組み合わせ。
+/// (`badge_items`, `text_items`) の代表的な並び
+pub(super) fn item_lists() -> Vec<(Vec<Element>, Vec<Element>)> {
+    use Element::*;
+    vec![
+        // 既定と、nerd_font の既定
+        (vec![Title, TabName], vec![]),
+        (vec![AppIcon, Title, TabName], vec![]),
+        // すべてバッジの外
+        (vec![], vec![Title, TabName]),
+        // すべての要素をバッジの中に、外に
+        (vec![AppIcon, Title, TabName, AppName, Cwd], vec![]),
+        (vec![AppIcon], vec![Title, TabName, AppName, Cwd]),
+        // 中と外に分け、app のアイコンをバッジの末尾に置く
+        (vec![TabName, AppIcon], vec![AppName, Cwd]),
+        // cwd が最後に残りやすい（括弧の分だけ広い）
+        (vec![AppIcon, Cwd], vec![]),
+        // 何もない（#<pane_id> だけになる）
+        (vec![], vec![]),
+    ]
+}
+
+/// アイコン・要素の並び・バッジの端の形・強調・アイコンの後ろの空白・msg の表示モードの組み合わせ。
 /// アイコンの後ろの空白は、Nerd Font のアイコンがある（効く）組み合わせでだけ true も入れる。
 /// msg の表示モードの `None` は、msg のないエージェントだけになるのと同じなので入れない
 pub(super) fn option_combinations() -> Vec<ViewOptions> {
@@ -73,30 +95,27 @@ pub(super) fn option_combinations() -> Vec<ViewOptions> {
     ];
     let mut combinations = vec![];
     for style in styles {
-        for show_app_icon in [false, true] {
-            let paddings = if show_app_icon || style == StateIconStyle::NerdFont {
+        for (badge_items, text_items) in item_lists() {
+            let app_icon =
+                badge_items.contains(&Element::AppIcon) || text_items.contains(&Element::AppIcon);
+            let paddings = if app_icon || style == StateIconStyle::NerdFont {
                 &[false, true][..]
             } else {
                 &[false]
             };
             for &nerd_font_icon_padding in paddings {
                 for badge_shape in shapes {
-                    for show_cwd in [false, true] {
-                        for highlight_attention in [false, true] {
-                            for name_in_badge in [false, true] {
-                                for msg_mode in [MsgMode::All, MsgMode::Attention] {
-                                    combinations.push(ViewOptions {
-                                        show_cwd,
-                                        badge_shape,
-                                        show_app_icon,
-                                        highlight_attention,
-                                        nerd_font_icon_padding,
-                                        name_in_badge,
-                                        msg_mode,
-                                        ..state_icons(style)
-                                    });
-                                }
-                            }
+                    for highlight_attention in [false, true] {
+                        for msg_mode in [MsgMode::All, MsgMode::Attention] {
+                            combinations.push(ViewOptions {
+                                badge_items: badge_items.clone(),
+                                text_items: text_items.clone(),
+                                badge_shape,
+                                highlight_attention,
+                                nerd_font_icon_padding,
+                                msg_mode,
+                                ..state_icons(style)
+                            });
                         }
                     }
                 }
@@ -116,10 +135,9 @@ pub(super) fn width_representative(options: &ViewOptions) -> ViewOptions {
     if matches!(options.badge_shape, BadgeShape::Arrow | BadgeShape::Round) {
         representative.badge_shape = BadgeShape::Slash;
     }
-    // 絵文字アイコンはバッジにしないので、badge_shape と name_in_badge は効かない
+    // 絵文字アイコンはバッジにしないので、badge_shape は効かない
     if options.state_icon_style == StateIconStyle::Emoji {
         representative.badge_shape = BadgeShape::Square;
-        representative.name_in_badge = false;
     }
     representative
 }

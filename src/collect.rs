@@ -31,7 +31,7 @@
 //!
 //! ## cwd の表
 //!
-//! カレントディレクトリは `PaneInfo` にないので、別に取得する。表示するかどうか（`show_cwd`）は view で決め、
+//! カレントディレクトリは `PaneInfo` にないので、別に取得する。表示するかどうか（`badge_items` / `text_items` の `cwd`）は view で決め、
 //! ここでは常に取得する（`get_pane_cwd` も `CwdChanged` も、すでに要求している `ReadApplicationState` で足りる）。
 //! - エージェントのペインが現れたら、`get_pane_cwd` で 1 回取得する（`CwdChanged` は変化したときにしか届かないため）
 //! - その後の移動は `CwdChanged` で追従する

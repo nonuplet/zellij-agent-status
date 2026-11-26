@@ -63,9 +63,10 @@ fn paint_colors_spans_and_fills_width() {
     assert_eq!(display_width(&visible), 20);
     assert_eq!(visible.trim_end(), "  ✗ claude");
 
-    // 名前をバッジに入れなければ、アイコンの直後が右端の空白で、名前は前景色のまま
+    // 要素をバッジに入れなければ、アイコンの直後が右端の空白で、名前は前景色のまま
     let without = ViewOptions {
-        name_in_badge: false,
+        badge_items: vec![],
+        text_items: vec![Element::Title, Element::TabName],
         ..Default::default()
     };
     let line = painted(&a, 20, &without);
@@ -84,7 +85,7 @@ fn paint_colors_spans_and_fills_width() {
     a.app = Some("claude-code".to_owned());
     let nerd = ViewOptions {
         badge_shape: BadgeShape::Slash,
-        show_app_icon: true,
+        badge_items: vec![Element::AppIcon, Element::Title],
         ..Default::default()
     };
     let line = painted(&[a.clone()], 20, &nerd);
@@ -96,7 +97,8 @@ fn paint_colors_spans_and_fills_width() {
         &[a],
         20,
         &ViewOptions {
-            name_in_badge: false,
+            badge_items: vec![],
+            text_items: vec![Element::AppIcon, Element::Title],
             ..nerd.clone()
         },
     );
@@ -229,9 +231,10 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
     // 選択モードの色（文字 15、背景 236）
     let select = "38;5;15;48;5;236m";
 
-    // 名前をバッジに入れないので、名前は行の色で描かれる
+    // 要素をバッジに入れないので、名前は行の色で描かれる
     let options = ViewOptions {
-        name_in_badge: false,
+        badge_items: vec![],
+        text_items: vec![Element::Title],
         ..Default::default()
     };
     let line = render_line(&a, 40, &options);
@@ -265,7 +268,7 @@ fn selection_mode_recolors_line_and_keeps_only_selected_badge() {
         "{selected:?}"
     );
 
-    // 既定（名前までバッジ）で msg もない場合でも、色の塊（バッジ）は選んでいるエージェントだけに残る
+    // 既定（title までバッジ）で msg もない場合でも、色の塊（バッジ）は選んでいるエージェントだけに残る
     let line = render_line(&a, 40, &ViewOptions::default());
     let unselected = line.paint(&test_theme(), None);
     let selected = line.paint(&test_theme(), Some(2));
@@ -305,7 +308,8 @@ fn inverted_text(line: &str) -> String {
 }
 
 #[test]
-fn selection_mode_inverts_selected_emoji_agent_up_to_name() {
+fn selection_mode_inverts_selected_emoji_agent_up_to_badge_items() {
+    use Element::*;
     let mut one = with_cwd(
         with_msg(agent(1, AgentState::Working), "Running"),
         "/repo/main",
@@ -313,12 +317,22 @@ fn selection_mode_inverts_selected_emoji_agent_up_to_name() {
     one.progress = Some(42);
     let two = with_msg(agent(2, AgentState::Error), "failed");
     let a = [one, two];
-    for name_in_badge in [false, true] {
+    // (badge_items, text_items, 選んでいるときに塗る部分)
+    let cases = [
+        (
+            vec![Title, Cwd],
+            vec![],
+            ["⏳ 42% claude (main)", "❌ claude"],
+        ),
+        (vec![Title], vec![Cwd], ["⏳ 42% claude", "❌ claude"]),
+        (vec![], vec![Title, Cwd], ["⏳ 42%", "❌"]),
+    ];
+    for (badge_items, text_items, expected) in cases {
         let emoji = ViewOptions {
             state_icon_style: StateIconStyle::Emoji,
-            show_cwd: true,
+            badge_items,
+            text_items,
             msg_mode: MsgMode::All,
-            name_in_badge,
             ..Default::default()
         };
         let line = render_line(&a, 80, &emoji);
@@ -330,8 +344,9 @@ fn selection_mode_inverts_selected_emoji_agent_up_to_name() {
         // 普段は塗らない
         assert!(!unselected.contains("48;5;"), "{unselected:?}");
 
-        // 選んでいるエージェントだけを、名前（と cwd）まで塗る。msg は塗らない。文字は変えない
-        for (pane_id, expected) in [(1, "⏳ 42% claude (main)"), (2, "❌ claude")] {
+        // 選んでいるエージェントだけを、badge_items の要素まで（バッジにするときと同じ範囲）塗る。
+        // msg は塗らない。文字は変えない
+        for (pane_id, expected) in [1, 2].into_iter().zip(expected) {
             let selected = line.paint(&test_theme(), Some(pane_id));
             assert_eq!(inverted_text(&selected), expected, "{selected:?}");
             assert_eq!(strip_ansi(&selected), strip_ansi(&unselected));
@@ -358,7 +373,7 @@ fn selection_mode_inverts_selected_emoji_agent_up_to_name() {
             "{selected:?}"
         );
         let selected = line.paint(&test_theme(), Some(1));
-        assert_eq!(inverted_text(&selected), "⏳ 42% claude (main)");
+        assert_eq!(inverted_text(&selected), expected[0]);
         assert!(!selected.contains("48;5;1m"), "{selected:?}");
     }
 }

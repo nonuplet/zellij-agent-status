@@ -1,36 +1,47 @@
-//! 幅の割り当て：各エージェントの名前・cwd・msg を、どの幅まで表示するかを決める。
+//! 幅の割り当て：各エージェントの要素と msg を、どの幅まで表示するかを決める。
 //!
-//! cwd はエージェントを見分けるためのものなので、縮めるときは msg より後まで残す。
-//! 幅が足りないときは、次の順に縮める（[`shrink`]）。
-//! 1. msg を各エージェントで均等に切り詰める（[`MIN_MSG_WIDTH`] を下回るなら次へ）
-//! 2. msg を省き、cwd を均等に切り詰める（[`MIN_CWD_WIDTH`] を下回るなら次へ）
-//! 3. cwd を省き、名前を均等に切り詰める（[`MIN_NAME_WIDTH`] を下回るなら次へ）
-//! 4. 状態アイコン（と進捗）だけにする
-//! 5. それでも収まらなければ、行の末尾を切る（[`clamp`](super::text::clamp)。末尾の
+//! 幅が足りないときは、一覧の順番やバッジの中か外かに関係なく、[`Slot::ALL`] の順
+//! （msg → cwd → `app_name` → `tab_name` → `title` → 最後に残る要素）に縮める（[`shrink`]）。
+//! 1. その Slot を各エージェントで均等に切り詰める（[`min_width`] を下回るなら次へ）
+//! 2. その Slot を省き、次の Slot で 1. を繰り返す
+//! 3. 最後に残る要素（[`Slot::Last`]。`Item::new` を参照）も収まらなければ、状態アイコン（と進捗）だけにする
+//! 4. それでも収まらなければ、行の末尾を切る（[`clamp`](super::text::clamp)。末尾の
 //!    [`ELLIPSIS`](super::text::ELLIPSIS) は切れた部分と同じ背景で塗る）
+//!
+//! 最後に残る要素を分けているのは、`app_name` しかないエージェントの名前が、`title` などより先に消えないようにするため。
 //!
 //! [`ViewOptions::max_agent_width`](super::ViewOptions::max_agent_width) を指定しているときは、まず 1 エージェント分
 //! （アイコン・進捗を含む）ずつ同じ手順でその幅に収め、そのうえで行の幅に収める（[`plan`]）。
 
-use super::item::{Item, Widths};
+use super::item::{Item, Slot, Widths};
 
-/// 切り詰めた msg / cwd / 名前がこの幅を下回るなら、切り詰めずに次の段階へ進む
+/// 切り詰めた msg / cwd / ほかの要素がこの幅を下回るなら、切り詰めずに次の段階へ進む
 pub(super) const MIN_MSG_WIDTH: usize = 6;
 pub(super) const MIN_CWD_WIDTH: usize = 4;
 pub(super) const MIN_NAME_WIDTH: usize = 4;
 /// [`ViewOptions::max_agent_width`](super::ViewOptions::max_agent_width) の下限。
 /// 状態アイコン（絵文字で 2、それ以外は 1）とバッジの両端（絵文字以外で 2。端が Nerd Font の文字なら内側の空白を足して 4）、
-/// 進捗（最大 ` 255%` の 5）に、名前の前の空白、[`MIN_NAME_WIDTH`]、名前の前の `app` のアイコンと前の空白
-/// （[`ViewOptions::show_app_icon`](super::ViewOptions::show_app_icon) で 2）、`app` のアイコンの後ろの空白
+/// 進捗（最大 ` 255%` の 5）に、最後に残る要素の前後（cwd なら ` (` と `)` の 3、ほかは前の空白の 1）、[`MIN_NAME_WIDTH`]、
+/// `app` のアイコンと前の空白（2）、`app` のアイコンの後ろの空白
 /// （[`ViewOptions::nerd_font_icon_padding`](super::ViewOptions::nerd_font_icon_padding) で 1）を足した幅。
-/// 最も広いのは、絵文字以外のアイコンで端を Nerd Font の文字にし（1 + 4）、`app` のアイコンとその後ろの空白を付けるとき。
+/// 最も広いのは、絵文字以外のアイコンで端を Nerd Font の文字にし（1 + 4）、`app` のアイコンとその後ろの空白を付け、
+/// cwd が最後に残るとき。
 /// 設定ごとに下限を変えると config の読み込みが設定の順番に依存するので、最も広い場合に合わせている。
 /// Nerd Font の状態アイコンの後ろの空白は、進捗がないときだけ付けるので、進捗の最大幅を超えない。
 ///
 /// これより小さい上限を許すと、次の問題が起きるため受け付けない（config で検証する）。
 /// - アイコンと進捗だけで上限を超えることがある（例：端が Nerd Font の文字のバッジ + ` 100%` で 10）
-/// - 上限に収めるために名前を省くことになり、エージェントを見分けられなくなる
-pub const MIN_MAX_AGENT_WIDTH: usize = 18;
+/// - 上限に収めるために最後に残る要素を省くことになり、エージェントを見分けられなくなる
+pub const MIN_MAX_AGENT_WIDTH: usize = 20;
+
+/// 切り詰めた `slot` の幅の下限。最後に残る要素は、元の要素によらず [`MIN_NAME_WIDTH`]
+fn min_width(slot: Slot) -> usize {
+    match slot {
+        Slot::Msg => MIN_MSG_WIDTH,
+        Slot::Cwd => MIN_CWD_WIDTH,
+        Slot::AppName | Slot::TabName | Slot::Title | Slot::Last => MIN_NAME_WIDTH,
+    }
+}
 
 /// 各エージェントの各部分の幅を決める（縮める順はモジュールの説明を参照）。
 /// `line_overhead` は行頭の余白とエージェント同士の区切りの幅の合計。
@@ -57,64 +68,41 @@ pub(super) fn plan(
     }
 }
 
-/// 各エージェントの各部分の幅の上限（`caps`）を、合計が `room` に収まるように縮める。
+/// 各エージェントの各 Slot の幅の上限（`caps`）を、合計が `room` に収まるように縮める。
+/// 前の Slot から順に省いていくので、ある Slot を切り詰めるときは、それより前の Slot はすべて省いてあり、
+/// 後ろの Slot はすべて上限の幅のまま。
 fn shrink(items: &[Item], caps: &[Widths], room: usize) -> Vec<Widths> {
-    let names: Vec<Option<usize>> = caps.iter().map(|w| w.name).collect();
-    let cwds: Vec<Option<usize>> = caps.iter().map(|w| w.cwd).collect();
-    let msgs: Vec<Option<usize>> = caps.iter().map(|w| w.msg).collect();
-    let hidden = vec![None; items.len()];
-
     let heads = items.iter().map(Item::head_width).sum::<usize>();
-    let names_overhead = overhead(items, &names, Item::name_overhead);
-    let names_total = total(&names) + names_overhead;
-    let cwds_overhead = overhead(items, &cwds, Item::cwd_overhead);
-    let cwds_total = total(&cwds) + cwds_overhead;
-    let msgs_overhead = overhead(items, &msgs, Item::msg_overhead);
-
-    if let Some(room) = room.checked_sub(heads + names_total + cwds_total + msgs_overhead)
-        && let Some(msgs) = fit(&msgs, room, MIN_MSG_WIDTH)
-    {
-        return zip(names, cwds, msgs);
+    let mut widths = caps.to_vec();
+    for slot in Slot::ALL {
+        // slot は切り詰めるので、付く部分の幅だけを数える
+        let fixed: usize = items
+            .iter()
+            .zip(&widths)
+            .map(|(item, w)| {
+                Slot::ALL
+                    .into_iter()
+                    .filter_map(|s| {
+                        let width = w.get(s)?;
+                        Some(item.overhead(s) + if s == slot { 0 } else { width })
+                    })
+                    .sum::<usize>()
+            })
+            .sum();
+        let current: Vec<Option<usize>> = widths.iter().map(|w| w.get(slot)).collect();
+        if let Some(room) = room.checked_sub(heads + fixed)
+            && let Some(shares) = fit(&current, room, min_width(slot))
+        {
+            for (w, share) in widths.iter_mut().zip(shares) {
+                w.set(slot, share);
+            }
+            return widths;
+        }
+        for w in &mut widths {
+            w.set(slot, None);
+        }
     }
-    if let Some(room) = room.checked_sub(heads + names_total + cwds_overhead)
-        && let Some(cwds) = fit(&cwds, room, MIN_CWD_WIDTH)
-    {
-        return zip(names, cwds, hidden);
-    }
-    if let Some(room) = room.checked_sub(heads + names_overhead)
-        && let Some(names) = fit(&names, room, MIN_NAME_WIDTH)
-    {
-        return zip(names, hidden.clone(), hidden);
-    }
-    vec![Widths::default(); items.len()]
-}
-
-/// 表示する（Some の）部分の幅の合計
-fn total(widths: &[Option<usize>]) -> usize {
-    widths.iter().flatten().sum()
-}
-
-/// 表示する（Some の）部分に付く部分（`overhead`）の幅の合計
-fn overhead(items: &[Item], widths: &[Option<usize>], overhead: fn(&Item) -> usize) -> usize {
-    items
-        .iter()
-        .zip(widths)
-        .filter(|(_, width)| width.is_some())
-        .map(|(item, _)| overhead(item))
-        .sum()
-}
-
-fn zip(
-    names: Vec<Option<usize>>,
-    cwds: Vec<Option<usize>>,
-    msgs: Vec<Option<usize>>,
-) -> Vec<Widths> {
-    names
-        .into_iter()
-        .zip(cwds)
-        .zip(msgs)
-        .map(|((name, cwd), msg)| Widths { name, cwd, msg })
-        .collect()
+    widths
 }
 
 /// `room` を [`fair_share`] で分け、切り詰めた結果が `min` を下回るものがあれば None。

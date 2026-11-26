@@ -37,7 +37,7 @@ pub use badge::BadgeShape;
 pub use fit::MIN_MAX_AGENT_WIDTH;
 pub use icon::StateIconStyle;
 pub use line::Line;
-pub use options::{DEFAULT_MAX_AGENT_WIDTH, MsgMode, ViewOptions};
+pub use options::{DEFAULT_MAX_AGENT_WIDTH, Element, MsgMode, ViewOptions};
 pub use theme::Theme;
 
 use crate::model::AgentStatus;
