@@ -21,7 +21,7 @@ use super::theme::{Color, Theme};
 ///   （[`Fill::Selected`]）。状態の色で塗ると、色の近い絵文字が見えにくくなるため。
 ///   `highlight_attention` で強調するエージェントは、絵文字アイコンでも普段から状態の色で塗るので、反転させない
 ///
-/// 色の塊で描くのは選んでいるエージェントだけになるので、msg の有無やバッジの範囲（`name_in_badge` など）に
+/// 色の塊で描くのは選んでいるエージェントだけになるので、msg の有無やバッジの範囲（`badge_items` など）に
 /// 関係なく、どれを選んでいるかが分かる。選んでいるエージェントのバッジは普段と同じ色で描く
 /// （反転すると、バッジが背景と同化して見づらくなるため）。
 pub(super) fn paint(spans: &[Span], cols: usize, theme: &Theme, selected: Option<u32>) -> String {

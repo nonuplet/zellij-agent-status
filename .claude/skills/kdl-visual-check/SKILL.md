@@ -60,9 +60,9 @@ scripts/osc7501.sh <state> [-a APP] [-k KIND] [-p 0〜100] [-t TITLE] [-m MSG]
   KIND   permission | question | auth（blocked のときだけ）
 ```
 
-- 名前は `title` → タブ名 → `app` の順に決まる。タブ名や `app` を検証するとき以外は `-t` で付け、ペインの `name` と揃える。
+- 既定では `title` とタブ名が表示される（`badge_items "title tab_name"`）。タブ名や `app` を検証するとき以外は `-t` で付け、ペインの `name` と揃える。
 - msg は、既定では `blocked` / `error` のときだけ表示される（`msg_mode`）。
-- `app_filter` や `show_app_icon` を使うときは `-a claude-code` を付ける（アイコンがあるのは `claude-code` だけ）。
+- `app_filter` や `app_icon` を使うときは `-a claude-code` を付ける（アイコンがあるのは `claude-code` だけ）。
 - `-n` は付けない。送信元が終わるとレコードが消える。
 - 状態の変化を見るときは、手で送らずに `scripts/osc7501-demo.sh <間隔> <app>` をペインで動かし、起動するだけで見られるようにする。
 - 4 件を超えるなら、`split_direction="vertical"` の行を増やす。
@@ -102,7 +102,7 @@ scripts/osc7501.sh <state> [-a APP] [-k KIND] [-p 0〜100] [-t TITLE] [-m MSG]
 
 ### cwd
 
-`show_cwd` の検証では、エージェントのペインに `cwd="src"` のように付け、スクリプトのパスを `../scripts/osc7501.sh` に直す。
+`cwd` の検証では、エージェントのペインに `cwd="src"` のように付け、スクリプトのパスを `../scripts/osc7501.sh` に直す。
 
 ### タブをまたぐ検証
 

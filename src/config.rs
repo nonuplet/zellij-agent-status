@@ -7,20 +7,23 @@
 //! ## キーの名前の付け方
 //!
 //! - 何に効くのかが名前だけで分かるようにする（`state_icon_style`、`max_agent_width` など）
-//! - 真偽値は、`true` のときにどうなるかを名前にする（`blocked_first`、`name_in_badge` など）
-//! - `show_` は、その部分を表示するかどうかにだけ使う
-//! - `use_` は、エージェントの名前の候補にするかどうかに使う（候補にしても、優先順位が上のものがあれば表示されない）
+//! - 真偽値は、`true` のときにどうなるかを名前にする（`blocked_first`、`highlight_attention` など）
+//! - `_items` は、表示する要素の一覧に付ける。どこに表示するかを前に付ける（`badge_items`、`text_items`）
 //! - `nerd_font_` は、Nerd Font の文字を使うアイコンにだけ効くものに付ける（`nerd_font` だけは既定値の切り替え）
 //! - 値で Nerd Font を表すときも `nerd_font` と書く
 //!
 //! ## 読み込みの規則
 //!
-//! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`use_app_name false`）も
-//! 文字列（`use_app_name "false"`）も、Zellij からは同じ文字列で届く。
+//! 真偽値は `true` / `false` だけを受け付ける。KDL の真偽値（`blocked_first false`）も
+//! 文字列（`blocked_first "false"`）も、Zellij からは同じ文字列で届く。
 //!
-//! 表示の並びは `blocked_first` 以外では変えられない。切り詰め方（どの順に縮めるか）は view（`src/view/fit.rs`）で固定している。
+//! 一覧（`app_filter`、`*_items`）は、カンマか空白で区切る。
 //!
-//! `nerd_font` は `state_icon_style` / `badge_shape` / `show_app_icon` の既定値を切り替えるだけで、どれも指定すればそちらを優先する。
+//! エージェントの並びは `blocked_first` 以外では変えられない。1 エージェント分の中の要素の並びは `*_items` に書いた順で、
+//! 切り詰め方（どの順に縮めるか）は並びによらず view（`src/view/fit.rs`）で固定している。
+//!
+//! `nerd_font` は `state_icon_style` / `badge_shape` / `badge_items` の既定値を切り替えるだけで、どれも指定すればそちらを優先する
+//! （`badge_items` を指定したときは、`app_icon` を足さない）。
 //! [`ViewOptions`] には切り替えた結果だけを入れ、`nerd_font` 自体は渡さない。
 //!
 //! 不正な値は、そのキーだけ既定値（`nerd_font` で変わるものは、切り替えた後の既定値）に戻して警告を返す。設定の誤りでプラグイン全体が動かなくなるのを避けるため。
@@ -29,7 +32,8 @@
 use std::collections::BTreeMap;
 
 use crate::view::{
-    BadgeShape, DEFAULT_MAX_AGENT_WIDTH, MIN_MAX_AGENT_WIDTH, MsgMode, StateIconStyle, ViewOptions,
+    BadgeShape, DEFAULT_MAX_AGENT_WIDTH, Element, MIN_MAX_AGENT_WIDTH, MsgMode, StateIconStyle,
+    ViewOptions,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -54,7 +58,7 @@ impl Config {
         if nerd_font {
             view.state_icon_style = StateIconStyle::NerdFont;
             view.badge_shape = BadgeShape::Slash;
-            view.show_app_icon = true;
+            view.badge_items.insert(0, Element::AppIcon);
         }
         r.read(
             "state_icon_style",
@@ -62,19 +66,17 @@ impl Config {
             choice(STATE_ICON_STYLES),
         );
         r.read("badge_shape", &mut view.badge_shape, choice(BADGE_SHAPES));
-        r.read("show_app_icon", &mut view.show_app_icon, parse_bool);
+        r.read("badge_items", &mut view.badge_items, parse_items);
+        r.read("text_items", &mut view.text_items, parse_items);
         r.read("app_filter", &mut view.app_filter, |value| {
             Ok(parse_app_filter(value))
         });
-        r.read("use_app_name", &mut view.use_app_name, parse_bool);
-        r.read("use_tab_name", &mut view.use_tab_name, parse_bool);
         r.read("blocked_first", &mut view.blocked_first, parse_bool);
         r.read(
             "max_agent_width",
             &mut view.max_agent_width,
             parse_max_agent_width,
         );
-        r.read("show_cwd", &mut view.show_cwd, parse_bool);
         r.read(
             "highlight_attention",
             &mut view.highlight_attention,
@@ -85,7 +87,6 @@ impl Config {
             &mut view.nerd_font_icon_padding,
             parse_bool,
         );
-        r.read("name_in_badge", &mut view.name_in_badge, parse_bool);
         r.read("msg_mode", &mut view.msg_mode, choice(MSG_MODES));
 
         (config, r.warnings)
@@ -175,14 +176,53 @@ fn parse_max_agent_width(value: &str) -> Result<Option<usize>, String> {
     }
 }
 
-/// カンマか空白で区切った一覧。空なら None（絞り込まない）。
-fn parse_app_filter(value: &str) -> Option<Vec<String>> {
-    let apps: Vec<String> = value
+/// カンマか空白で区切った一覧。区切りが続いたり前後にあったりしても、空の項目は作らない
+fn split_list(value: &str) -> impl Iterator<Item = &str> {
+    value
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect();
+}
+
+/// 空なら None（絞り込まない）。
+fn parse_app_filter(value: &str) -> Option<Vec<String>> {
+    let apps: Vec<String> = split_list(value).map(str::to_string).collect();
     (!apps.is_empty()).then_some(apps)
+}
+
+const ELEMENTS: &[(&str, Element)] = &[
+    ("title", Element::Title),
+    ("tab_name", Element::TabName),
+    ("app_name", Element::AppName),
+    ("app_icon", Element::AppIcon),
+    ("cwd", Element::Cwd),
+];
+
+/// 要素の一覧。空なら空の一覧にする（`app_filter` と違い、既定値には戻さない。
+/// 表示できる要素がなければ `#<pane_id>` を表示するのは view で決める）。知らない要素名か、重複があれば不正。
+/// 警告文の案内は、受け付ける値と同じく [`ELEMENTS`] から作る。
+fn parse_items(value: &str) -> Result<Vec<Element>, String> {
+    let invalid = || {
+        let names: Vec<String> = ELEMENTS
+            .iter()
+            .map(|(name, _)| format!("`{name}`"))
+            .collect();
+        guidance(&format!(
+            "{} から、重複しないように選んでカンマか空白で区切ったもの",
+            names.join("・")
+        ))
+    };
+    let mut items = vec![];
+    for name in split_list(value) {
+        let &(_, element) = ELEMENTS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .ok_or_else(invalid)?;
+        if items.contains(&element) {
+            return Err(invalid());
+        }
+        items.push(element);
+    }
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -200,14 +240,9 @@ mod tests {
 
     /// 真偽値の設定と、そのフィールド（`nerd_font` は対応するフィールドがないので、別のテストで確かめる）
     const BOOL_KEYS: &[(&str, Field)] = &[
-        ("show_app_icon", |view| view.show_app_icon),
-        ("use_app_name", |view| view.use_app_name),
-        ("use_tab_name", |view| view.use_tab_name),
         ("blocked_first", |view| view.blocked_first),
-        ("show_cwd", |view| view.show_cwd),
         ("highlight_attention", |view| view.highlight_attention),
         ("nerd_font_icon_padding", |view| view.nerd_font_icon_padding),
-        ("name_in_badge", |view| view.name_in_badge),
     ];
 
     #[test]
@@ -216,16 +251,13 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(config.view.state_icon_style, StateIconStyle::Symbol);
         assert_eq!(config.view.app_filter, None);
-        assert!(config.view.use_app_name);
-        assert!(config.view.use_tab_name);
         assert!(!config.view.blocked_first);
         assert_eq!(config.view.max_agent_width, Some(DEFAULT_MAX_AGENT_WIDTH));
-        assert!(!config.view.show_cwd);
+        assert_eq!(config.view.badge_items, [Element::Title, Element::TabName]);
+        assert_eq!(config.view.text_items, []);
         assert_eq!(config.view.badge_shape, BadgeShape::Square);
-        assert!(!config.view.show_app_icon);
         assert!(!config.view.highlight_attention);
         assert!(!config.view.nerd_font_icon_padding);
-        assert!(config.view.name_in_badge);
         assert_eq!(config.view.msg_mode, MsgMode::Attention);
     }
 
@@ -267,9 +299,14 @@ mod tests {
     fn warning_messages() {
         let cases = [
             (
-                "show_cwd",
+                "blocked_first",
                 "yes",
-                "show_cwd: `yes` は使えません。`true` か `false` を指定してください（既定値を使います）",
+                "blocked_first: `yes` は使えません。`true` か `false` を指定してください（既定値を使います）",
+            ),
+            (
+                "badge_items",
+                "title,app",
+                "badge_items: `title,app` は使えません。`title`・`tab_name`・`app_name`・`app_icon`・`cwd` から、重複しないように選んでカンマか空白で区切ったものを指定してください（既定値を使います）",
             ),
             (
                 "state_icon_style",
@@ -289,7 +326,7 @@ mod tests {
             (
                 "max_agent_width",
                 "17",
-                "max_agent_width: `17` は使えません。0（上限なし）か 18 以上の整数を指定してください（既定値 50 を使います）",
+                "max_agent_width: `17` は使えません。0（上限なし）か 20 以上の整数を指定してください（既定値 50 を使います）",
             ),
         ];
         for (key, value, expected) in cases {
@@ -304,7 +341,8 @@ mod tests {
         let (_, warnings) = Config::from_configuration(&configuration(&[
             ("msg_mode", "x"),
             ("max_agent_width", "x"),
-            ("show_app_icon", "x"),
+            ("text_items", "x"),
+            ("badge_items", "x"),
             ("badge_shape", "x"),
             ("state_icon_style", "x"),
             ("nerd_font", "x"),
@@ -319,7 +357,8 @@ mod tests {
                 "nerd_font",
                 "state_icon_style",
                 "badge_shape",
-                "show_app_icon",
+                "badge_items",
+                "text_items",
                 "max_agent_width",
                 "msg_mode"
             ]
@@ -331,7 +370,7 @@ mod tests {
         ViewOptions {
             state_icon_style: StateIconStyle::NerdFont,
             badge_shape: BadgeShape::Slash,
-            show_app_icon: true,
+            badge_items: vec![Element::AppIcon, Element::Title, Element::TabName],
             ..Default::default()
         }
     }
@@ -394,16 +433,17 @@ mod tests {
                 };
                 assert_eq!(read("badge_shape", value), expected, "{nerd_font} {value}");
             }
-            for (value, show_app_icon) in [("true", true), ("false", false)] {
+            // badge_items を指定したら、nerd_font でも app_icon を足さない
+            for (value, badge_items) in [
+                ("title", vec![Element::Title]),
+                ("app_icon cwd", vec![Element::AppIcon, Element::Cwd]),
+                ("", vec![]),
+            ] {
                 let expected = ViewOptions {
-                    show_app_icon,
+                    badge_items,
                     ..defaults.clone()
                 };
-                assert_eq!(
-                    read("show_app_icon", value),
-                    expected,
-                    "{nerd_font} {value}"
-                );
+                assert_eq!(read("badge_items", value), expected, "{nerd_font} {value}");
             }
         }
     }
@@ -414,7 +454,7 @@ mod tests {
             ("true", nerd_font_defaults()),
             ("false", ViewOptions::default()),
         ] {
-            for key in ["state_icon_style", "badge_shape", "show_app_icon"] {
+            for key in ["state_icon_style", "badge_shape", "badge_items"] {
                 let (config, warnings) = Config::from_configuration(&configuration(&[
                     ("nerd_font", nerd_font),
                     (key, "x"),
@@ -497,7 +537,7 @@ mod tests {
     fn max_agent_width() {
         let cases = [
             ("40", Some(40)),
-            ("18", Some(MIN_MAX_AGENT_WIDTH)),
+            ("20", Some(MIN_MAX_AGENT_WIDTH)),
             ("0", None),
         ];
         for (value, expected) in cases {
@@ -510,7 +550,7 @@ mod tests {
 
     #[test]
     fn invalid_max_agent_width_falls_back_to_default_with_warning() {
-        for value in ["abc", "1", "17", "-1", "40.5", " 40", ""] {
+        for value in ["abc", "1", "19", "-1", "40.5", " 40", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("max_agent_width", value),
                 ("app_filter", "claude"),
@@ -551,11 +591,11 @@ mod tests {
         for value in ["All", "blocked", "true", ""] {
             let (config, warnings) = Config::from_configuration(&configuration(&[
                 ("msg_mode", value),
-                ("use_app_name", "false"),
+                ("blocked_first", "true"),
             ]));
             assert_eq!(config.view.msg_mode, MsgMode::Attention, "{value}");
             // 他のキーは影響を受けない
-            assert!(!config.view.use_app_name, "{value}");
+            assert!(config.view.blocked_first, "{value}");
             assert_eq!(warnings.len(), 1, "{value}");
             assert!(warnings[0].starts_with("msg_mode:"), "{value}");
         }
@@ -581,6 +621,77 @@ mod tests {
             Config::from_configuration(&configuration(&[("app_filter", "claude")]));
         assert!(warnings.is_empty());
         assert_eq!(config.view.app_filter, Some(vec!["claude".to_string()]));
+    }
+
+    #[test]
+    fn items_keep_written_order() {
+        use Element::*;
+        let cases = [
+            ("title", vec![Title]),
+            (
+                "cwd app_name,tab_name, app_icon  title",
+                vec![Cwd, AppName, TabName, AppIcon, Title],
+            ),
+            // 空なら空の一覧（app_filter と違い、既定値には戻さない）
+            ("", vec![]),
+            (" , ", vec![]),
+        ];
+        for key in ["badge_items", "text_items"] {
+            for (value, expected) in &cases {
+                let (config, warnings) =
+                    Config::from_configuration(&configuration(&[(key, value)]));
+                assert!(warnings.is_empty(), "{key} {value}");
+                let items = match key {
+                    "badge_items" => &config.view.badge_items,
+                    _ => &config.view.text_items,
+                };
+                assert_eq!(items, expected, "{key} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_items_fall_back_to_default_with_warning() {
+        // 知らない要素名、大文字、1 つのキーの中での重複
+        for value in [
+            "app",
+            "Title",
+            "title msg",
+            "title,title",
+            "cwd tab_name cwd",
+        ] {
+            for key in ["badge_items", "text_items"] {
+                let (config, warnings) = Config::from_configuration(&configuration(&[
+                    (key, value),
+                    ("app_filter", "claude"),
+                ]));
+                assert_eq!(
+                    config.view,
+                    ViewOptions {
+                        app_filter: Some(vec!["claude".to_string()]),
+                        ..Default::default()
+                    },
+                    "{key} {value}"
+                );
+                assert_eq!(warnings.len(), 1, "{key} {value}");
+                assert!(warnings[0].starts_with(&format!("{key}:")), "{key} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn same_item_in_both_keys_is_accepted() {
+        // 既定の badge_items と重なることもあるので、警告しない（表示は badge_items だけ。view で決める）
+        let (config, warnings) = Config::from_configuration(&configuration(&[
+            ("badge_items", "title cwd"),
+            ("text_items", "cwd tab_name"),
+        ]));
+        assert!(warnings.is_empty());
+        assert_eq!(config.view.badge_items, [Element::Title, Element::Cwd]);
+        assert_eq!(config.view.text_items, [Element::Cwd, Element::TabName]);
+        let (_, warnings) =
+            Config::from_configuration(&configuration(&[("text_items", "tab_name")]));
+        assert!(warnings.is_empty());
     }
 
     #[test]

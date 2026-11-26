@@ -19,7 +19,7 @@ pub struct AgentStatus {
     /// ペインが属するタブの名前（`TabUpdate` の `TabInfo.name`）。`TabUpdate` がまだ届いていなければ None
     pub tab_name: Option<String>,
     /// ペインのカレントディレクトリ（ペインのルートプロセス、通常はシェルのもの）。
-    /// まだ取得していないとき、取得に失敗したときは None。表示するかどうかは view の `show_cwd` で決める
+    /// まだ取得していないとき、取得に失敗したときは None。表示するかどうかは view の `badge_items` / `text_items` で決める
     pub cwd: Option<PathBuf>,
     pub state: AgentState,
     /// 0〜100
